@@ -666,58 +666,95 @@ export function LoginPage(props) {
       return;
     }
 
-    const proceedLogin = async (user) => {
-      setLoginAttempts(0); setLockedUntil(null); // FIX v63 C1 — réinitialiser compteur sur succès
-
-      // ✅ CRITICAL FIX: Call backend login API to get JWT token
+    // Vérification serveur pure (quand le hash n'est pas disponible localement)
+    const _verifyViaServer = async (user) => {
       try {
-        const backendLoginResponse = await fetch(`${getProxyUrl()}/api/auth/login`, {
+        const r = await fetch(`${getProxyUrl()}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             username: user.alias || user.username || user.email || user.id,
-            password: password // Send plaintext password, backend will verify with bcrypt
+            password
           })
         });
-
-        if (!backendLoginResponse.ok) {
-          const errorData = await backendLoginResponse.json().catch(() => ({ error: 'Login failed' }));
-          console.error('[AUTH] Backend login failed:', errorData);
-          setError('Erreur de connexion au serveur. Veuillez réessayer.');
+        if (r.status === 401 || r.status === 403) {
+          const newAttempts = loginAttempts + 1;
+          setLoginAttempts(newAttempts);
+          if (newAttempts >= 10) { setLockedUntil(Date.now() + 30*60*1000); setLoginAttempts(0); }
+          else if (newAttempts >= 5) { setLockedUntil(Date.now() + 15*60*1000); }
+          setError("Mot de passe incorrect. Contactez l'administration du SI.");
+          playSound("alarm");
+          if (onSessionLog) onSessionLog("TENTATIVE", user, { status:"FAILED", reason:"Mot de passe rejeté par le serveur" });
+          return;
+        }
+        if (r.status === 429) {
+          const d = await r.json().catch(() => ({}));
+          setError(d.error || "Trop de tentatives. Réessayez plus tard.");
           playSound("alarm");
           return;
         }
-
-        const loginData = await backendLoginResponse.json();
-        if (!loginData.ok || !loginData.token) {
-          console.error('[AUTH] Invalid backend response:', loginData);
-          setError('Réponse invalide du serveur. Veuillez réessayer.');
+        if (!r.ok) {
+          setError("Serveur inaccessible. Vérifiez la connexion réseau.");
           playSound("alarm");
           return;
         }
+        const data = await r.json().catch(() => null);
+        if (data?.ok && data.token) {
+          _lsSet('gc-jwt-token', data.token);
+          // Resync users complet maintenant qu'on a le JWT
+          try {
+            const { dsGet: _dsGet } = await import('../core/datastore.js');
+            const { lsSave: _lsSave } = await import('../core/storage.js');
+            const fullUsers = await _dsGet('users', null);
+            if (Array.isArray(fullUsers) && fullUsers.length > 0) {
+              _lsSave('users', fullUsers);
+              if (setUsers) setUsers(fullUsers);
+            }
+          } catch (_) {}
+        }
+        // Le serveur a validé le mot de passe → continuer (JWT déjà stocké ci-dessus)
+        proceedLogin(user, true);
+      } catch (netErr) {
+        setError("Serveur inaccessible. Vérifiez la connexion réseau.");
+        playSound("alarm");
+      }
+    };
 
-        // ✅ Store JWT token for subsequent API calls
-        _lsSet('gc-jwt-token', loginData.token);
-        console.log('[AUTH] ✅ JWT token stored for API authentication');
+    // jwtAlreadyStored=true quand appelé depuis _verifyViaServer qui a déjà stocké le JWT
+    const proceedLogin = async (user, jwtAlreadyStored = false) => {
+      setLoginAttempts(0); setLockedUntil(null);
 
-        // Re-sync users with full data (incl. passwordHash) now that the JWT is available.
-        // On a fresh machine, the pre-login fetch returned stripped users (no passwordHash).
-        // We need the full profile for admin operations and password changes.
+      if (!jwtAlreadyStored) {
+        // Obtenir le JWT depuis le serveur. Échec = mode local sans JWT (ne bloque pas la connexion)
         try {
-          const { dsGet: _dsGet } = await import('../core/datastore.js');
-          const { lsSave: _lsSave } = await import('../core/storage.js');
-          const fullUsers = await _dsGet('users', null);
-          if (Array.isArray(fullUsers) && fullUsers.length > 0) {
-            _lsSave('users', fullUsers);
-            if (setUsers) setUsers(fullUsers);
-            console.log('[AUTH] ✅ Users re-sync complet post-login (hashes restaurés)');
+          const r = await fetch(`${getProxyUrl()}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: user.alias || user.username || user.email || user.id,
+              password
+            })
+          });
+          if (r.ok) {
+            const loginData = await r.json().catch(() => null);
+            if (loginData?.ok && loginData.token) {
+              _lsSet('gc-jwt-token', loginData.token);
+              try {
+                const { dsGet: _dsGet } = await import('../core/datastore.js');
+                const { lsSave: _lsSave } = await import('../core/storage.js');
+                const fullUsers = await _dsGet('users', null);
+                if (Array.isArray(fullUsers) && fullUsers.length > 0) {
+                  _lsSave('users', fullUsers);
+                  if (setUsers) setUsers(fullUsers);
+                }
+              } catch (_) {}
+            }
+          } else {
+            console.warn('[AUTH] Serveur a refusé les identifiants — mode local sans JWT');
           }
-        } catch (_) {}
-
-      } catch (backendError) {
-        console.error('[AUTH] Backend login error:', backendError);
-        // Continue with local login for now, but log the issue
-        console.warn('[AUTH] ⚠️ Backend login failed, proceeding with local auth only');
+        } catch (_) {
+          console.warn('[AUTH] Serveur inaccessible — mode local sans JWT');
+        }
       }
 
       const isMGUser = user.isMG || user.id === "USR-MG-001";
@@ -835,11 +872,9 @@ export function LoginPage(props) {
 
     const expectedPwdOrHash = user.passwordHash || user.password;
     if (isAdminMode) {
-      // FIX v123 — Passer le storedHash de l'user pour que gcVerifyAdmin fonctionne
-      // indépendamment du contexte crypto (HTTPS ou HTTP/fallback)
       if (!expectedPwdOrHash) {
-        // Hash absent (client non encore authentifié) → déléguer au serveur
-        proceedLogin(user);
+        // Hash absent → vérification serveur obligatoire
+        _verifyViaServer(user);
         return;
       }
       gcVerifyAdmin(userId, password, user.passwordHash).then(adminOk => {
@@ -853,8 +888,8 @@ export function LoginPage(props) {
       return;
     } else {
       if (!expectedPwdOrHash) {
-        // Hash absent (réponse serveur anonyme sans passwordHash) → le serveur vérifie le mot de passe
-        proceedLogin(user);
+        // Hash absent → vérification serveur obligatoire
+        _verifyViaServer(user);
         return;
       }
       gcVerifyPassword(password, expectedPwdOrHash).then(pwdOk => {

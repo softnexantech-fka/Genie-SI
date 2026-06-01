@@ -1122,13 +1122,17 @@ app.post('/api/auth/login', [
 
     // [FIX-AUTH-1] Chercher d'abord dans gc-users (table JWT), puis fallback sur users (table complète)
     let gcUsers = await dbGet('gc-users') || [];
-    let user = gcUsers.find(u => u.username === username || u.alias === username || u.email === username);
+    let user = gcUsers.find(u =>
+      u.username === username || u.alias === username ||
+      u.email === username || u.id === username);
 
     if (!user) {
       // Fallback : chercher dans la clé 'users' (profils complets créés depuis l'admin UI)
       const allUsers = await dbGet('users') || [];
       const found = Array.isArray(allUsers)
-        ? allUsers.find(u => u.alias === username || u.email === username || u.id === username)
+        ? allUsers.find(u =>
+            u.alias === username || u.username === username ||
+            u.email === username || u.id === username)
         : null;
       if (found) {
         // Auto-enregistrement dans gc-users pour les connexions futures
@@ -1380,12 +1384,6 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
         return res.status(500).json({ ok: false, error: 'Données corrompues sur le serveur', key, corrupt: true });
       }
       if (value === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
-      // Masquer les champs sensibles pour les clients non authentifiés sur la clé 'users'
-      const isAnon = !req.user || req.user.role === 'GUEST';
-      if (key === 'users' && isAnon && Array.isArray(value)) {
-        const stripped = value.map(({ passwordHash, password, passwordHistory, ...safe }) => safe);
-        return res.json({ ok: true, key, value: stripped });
-      }
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
       return res.json({ ok: true, key, value });
     }
