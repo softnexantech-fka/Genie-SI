@@ -979,9 +979,11 @@ io.on('connection', (socket) => {
       for (const item of batch) {
         if (!item?.key || !isAllowedKey(item.key)) continue;
         if (item.value === undefined || item.value === null) continue;
-        const valJson = JSON.stringify(item.value);
+        const validated = validateAndSanitizeValue(item.key, item.value);
+        if (!validated.ok) continue;
+        const valJson = JSON.stringify(validated.value);
         if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
-        const ok = await dbSet(item.key, item.value, verifiedUserId);
+        const ok = await dbSet(item.key, validated.value, verifiedUserId);
         if (ok) {
           synced++;
           broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now() }, socket.id);
@@ -995,7 +997,9 @@ io.on('connection', (socket) => {
           for (const item of batch) {
             if (!item?.key || !isAllowedKey(item.key)) continue;
             if (item.value === undefined || item.value === null) continue;
-            const val = JSON.stringify(item.value);
+            const vr = validateAndSanitizeValue(item.key, item.value);
+            if (!vr.ok) continue;
+            const val = JSON.stringify(vr.value);
             if (Buffer.byteLength(val, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
             const ts = Math.floor(Date.now() / 1000);
             db.prepare(
@@ -1292,6 +1296,7 @@ const CRITICAL_EMPTY_ARRAY_KEYS = new Set([
 // collaborateur niveau 1 pouvait modifier le nom du cabinet, la config fiscale,
 // la matrice d'accès aux processus, etc. via un appel POST direct à /api/data/:key.
 const ADMIN_ONLY_WRITE_KEYS = new Set([
+  'gc-users',
   'gc-cabinet-info',
   'gc-fiscal-config',
   'gc-delai-config',
@@ -1482,13 +1487,14 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
 
     await redisInvalidateCache(key);
 
-    try {
+    if (key === 'users' || key === 'gc-users') try {
       let existingGcUsers = await dbGet('gc-users') || [];
       let changed = false;
       if (Array.isArray(writeValue)) {
         for (const u of writeValue) {
           if (!u.id || !u.passwordHash) continue;
-          const gcIdx = existingGcUsers.findIndex(g => g.id === u.id || g.username === u.alias || g.email === u.email);
+          // Match uniquement par ID pour éviter les faux positifs sur alias/email partagé
+          const gcIdx = existingGcUsers.findIndex(g => g.id === u.id);
           const gcEntry = {
             id:            u.id,
             username:      u.alias || u.id,
@@ -1512,7 +1518,7 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
           }
         }
       } else {
-        console.warn('[SYNC-AUTH] writeValue incohérent pour gc-users sync, pas de boucle exécutée.');
+        console.warn('[SYNC-AUTH] writeValue non-tableau pour', key, '— sync gc-users ignoré.');
       }
       // FIX BUG-B8 — Pruning sécurisé de gc-users.
       // Quand un admin (level >= 6) sauvegarde explicitement la liste users avec

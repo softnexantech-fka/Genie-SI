@@ -574,7 +574,7 @@ export function LoginPage(props) {
         return !u.isAdmin;
       });
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     // FIX v63 C1  -  Rate limiting guard
     if (isLoginLocked) { setError(`🔒 Trop de tentatives. Réessayez dans ${Math.ceil((lockedUntil-Date.now())/1000)}s.`); playSound("alarm"); return; }
     // v116 — Admin mode bypasse les chartes (accès système, pas collaborateur)

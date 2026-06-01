@@ -289,7 +289,7 @@ export default function App() {
     let _dsStopSync = null;
     
     // 1. Synchronisation initiale avec le serveur partagé
-    dsInitSync().then(result => {
+    dsInitSync().then(async result => {
       if (result.online) {
         console.log(`[SI] ✅ Connecté au serveur — hydratation depuis SQLite en cours…`);
         // FIX vSERVER-TIME — synchroniser l'heure du SI avec le serveur
