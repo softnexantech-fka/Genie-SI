@@ -78,9 +78,15 @@ const _GC_SOUND_DEFAULTS = {
   volume:  0.8,         // multiplicateur volume 0.0→1.0
 };
 
+// FIX BUG-B11 — Utiliser _lsGet / _lsSet (avec fallback mémoire _GC_MEM) au lieu de
+// localStorage.* directement. Sans cela, si localStorage est plein/désactivé, les
+// settings son ne sont jamais persistés et playSound ne trouve rien → son coupé.
 export const gcGetSoundSettings = () => {
   try {
-    const saved = JSON.parse(localStorage.getItem(_GC_SOUND_KEY) || "{}");
+    const raw = (typeof window !== 'undefined' && window.__gcLsGet)
+      ? window.__gcLsGet(_GC_SOUND_KEY)
+      : (typeof localStorage !== 'undefined' ? localStorage.getItem(_GC_SOUND_KEY) : null);
+    const saved = JSON.parse(raw || "{}");
     return { ..._GC_SOUND_DEFAULTS, ...saved };
   } catch(_) { return { ..._GC_SOUND_DEFAULTS }; }
 };
@@ -89,8 +95,12 @@ export const gcSetSoundSettings = (patch) => {
   try {
     const current = gcGetSoundSettings();
     const next = { ...current, ...patch };
-    localStorage.setItem(_GC_SOUND_KEY, JSON.stringify(next));
-    // Émettre un événement pour que les composants puissent réagir en temps réel
+    const json = JSON.stringify(next);
+    if (typeof window !== 'undefined' && window.__gcLsSet) {
+      window.__gcLsSet(_GC_SOUND_KEY, json);
+    } else if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(_GC_SOUND_KEY, json);
+    }
     window.dispatchEvent(new CustomEvent("gc:sound-settings-changed", { detail: next }));
     return next;
   } catch(_) {}

@@ -927,6 +927,32 @@ export function dsOfflineQueueSize() {
   return loadOfflineQueue().length;
 }
 
+// FIX BUG-B8 — Sauvegarde de la liste users avec pruning explicite côté serveur.
+// À appeler UNIQUEMENT par un admin lors de la suppression intentionnelle d'un compte.
+// Le serveur retirera de gc-users les comptes absents de la nouvelle liste.
+// Sécurité : le serveur vérifie req.user.level >= 6 || req.user.isAdmin.
+export async function dsSaveUsersWithPrune(usersList, userId = null) {
+  lsSave('users', usersList);
+  _cache.set('users', { data: usersList, ts: Date.now() });
+  if (!_online) {
+    enqueueOffline('users', usersList, userId);
+    startOfflineRetryLoop();
+    return { ok: true, local: true, queued: true };
+  }
+  try {
+    const r = await fetch(`${getProxyUrl()}/api/data/${encodeURIComponent('users')}`, {
+      method:  'POST',
+      headers: getRequestHeaders({ 'x-prune-users': '1', 'x-force-overwrite': '1' }),
+      body:    JSON.stringify({ value: usersList, userId }),
+      signal:  AbortSignal.timeout(DS_SAVE_TIMEOUT_MS),
+    });
+    if (!r.ok) return { ok: false, status: r.status };
+    return { ok: true, pruned: true };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
 // [FIX-SYNC-AUTH] gcSyncAuthUsers — Déclenche la synchronisation gc-users depuis users
 // sur le serveur. À appeler après toute création/modification/suppression de compte.
 // Silencieux en mode offline ou si le serveur n'est pas joignable.
@@ -957,7 +983,7 @@ export default {
   dsProxyAvailable, dsOfflineQueueSize,
   dsInitSync, dsOnSync, dsStartSync,
   dsLoad, dsGet, dsSave, dsSet: dsSave, dsDelete,
-  dsMarkDeleted, dsDeleteItem, dsDeleteItemFromArray, dsClearTombstones,
+  dsMarkDeleted, dsDeleteItem, dsDeleteItemFromArray, dsClearTombstones, dsSaveUsersWithPrune,
   gcSyncAuthUsers,
   SHARED_KEYS, getJWTToken, getRequestHeaders, getProxyUrl,
 };

@@ -13,6 +13,15 @@ export const _lsGet = (k) => { try { return localStorage.getItem(k); } catch (_)
 export const _lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) { _GC_MEM[k] = v; } };
 export const _lsRm  = (k) => { try { localStorage.removeItem(k); } catch (_) { delete _GC_MEM[k]; } };
 
+// FIX BUG-B11 — Exposer _lsGet/_lsSet sur window pour que helpers.js (notamment
+// gcGetSoundSettings) utilise la même couche avec fallback mémoire _GC_MEM.
+try {
+  if (typeof window !== 'undefined') {
+    window.__gcLsGet = _lsGet;
+    window.__gcLsSet = _lsSet;
+  }
+} catch (_) {}
+
 // FIX v63 C5  -  Versioning schéma localStorage
 export const LS_SCHEMA_VERSION = "63";
 export const _checkSchemaVersion = () => {

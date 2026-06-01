@@ -1419,7 +1419,7 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     await redisInvalidateCache(key);
 
     try {
-      const existingGcUsers = await dbGet('gc-users') || [];
+      let existingGcUsers = await dbGet('gc-users') || [];
       let changed = false;
       if (Array.isArray(writeValue)) {
         for (const u of writeValue) {
@@ -1450,8 +1450,23 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
       } else {
         console.warn('[SYNC-AUTH] writeValue incohérent pour gc-users sync, pas de boucle exécutée.');
       }
-      // [FIX-PRUNE] Suppression du pruning destructeur — préserve tous les comptes existants
-      // Évite suppression accidentelle lors de sauvegardes partielles de l'UI
+      // FIX BUG-B8 — Pruning sécurisé de gc-users.
+      // Quand un admin (level >= 6) sauvegarde explicitement la liste users avec
+      // header 'x-prune-users: 1' (envoyé par l'UI lors d'une suppression de compte),
+      // on retire les comptes absents de la nouvelle liste. Sans ce header, on garde
+      // l'ancien comportement (pas de suppression) pour éviter les pertes accidentelles
+      // lors des sauvegardes partielles.
+      const isAdminCall = (req.user?.level || 0) >= 6 || req.user?.isAdmin;
+      const requestPrune = req.headers['x-prune-users'] === '1' && isAdminCall;
+      if (requestPrune && (key === 'users' || key === 'gc-users') && Array.isArray(writeValue)) {
+        const incomingIds = new Set(writeValue.map(u => u?.id).filter(Boolean));
+        const before = existingGcUsers.length;
+        existingGcUsers = existingGcUsers.filter(g => incomingIds.has(g.id));
+        if (existingGcUsers.length !== before) {
+          changed = true;
+          console.log(`[SYNC-AUTH] Pruning admin : ${before - existingGcUsers.length} compte(s) retiré(s) de gc-users`);
+        }
+      }
       if (changed) {
         await dbSet('gc-users', existingGcUsers);
         console.log(`[SYNC-AUTH] gc-users synchronisé (${existingGcUsers.length} comptes)`);

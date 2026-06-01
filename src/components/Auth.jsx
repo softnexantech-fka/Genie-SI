@@ -592,7 +592,16 @@ export function LoginPage(props) {
     // FIX v132 — Si compte suspendu mais awaitingApproval actif :
     // Chercher dans pendingConnections OU dans user.accessCode (chemin DG/RH qui retire la demande)
     if (acctStatus.startsWith("SUSPENDU") && awaitingApproval && approvalCode.trim()) {
-      const pending = pendingConnections || [];
+      // FIX BUG-B6 — Rafraîchir pendingConnections depuis le serveur AVANT le check.
+      // Sans cela, une approbation faite depuis une autre machine n'est pas visible
+      // immédiatement sur cette machine → l'utilisateur voit "code invalide" alors
+      // que son admin vient d'approuver.
+      let pending = pendingConnections || [];
+      try {
+        const { dsGet: _dsGetFresh } = await import('../core/datastore.js');
+        const fresh = await _dsGetFresh('gc-pending-connections', null);
+        if (Array.isArray(fresh)) pending = fresh;
+      } catch (_) {}
       const req = pending.find(r => r.userId === user.id);
       // Fallback : code stocké directement sur user par approbateur DG/RH
       const codeToCheck = req?.approvedCode ?? user.accessCode ?? null;

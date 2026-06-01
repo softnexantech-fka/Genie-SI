@@ -59,11 +59,21 @@ export default function App() {
       const saved = _lsGet("gc-si-docs");
       if (saved) {
         const parsed = JSON.parse(saved);
+        // FIX BUG-B3 — Nettoyer les placeholders "[STORED]" hérités de l'ancien bug.
+        // Si dataUrl == "[STORED]", c'est un vestige du précédent fix cassé : on le supprime
+        // pour que l'UI re-télécharge depuis le serveur au lieu d'afficher "[STORED]".
+        const cleaned = parsed.map(d => {
+          if (d && d.dataUrl === "[STORED]") {
+            const { dataUrl: _du, ...rest } = d;
+            return rest;
+          }
+          return d;
+        });
         const merged = INITIAL_SI_SYSTEM_DOCS.map(init => {
-          const found = parsed.find(d => d.id === init.id);
+          const found = cleaned.find(d => d.id === init.id);
           return found ? { ...init, ...found } : init;
         });
-        const customDocs = parsed.filter(d => !INITIAL_SI_SYSTEM_DOCS.find(i => i.id === d.id));
+        const customDocs = cleaned.filter(d => !INITIAL_SI_SYSTEM_DOCS.find(i => i.id === d.id));
         return [...merged, ...customDocs];
       }
     } catch (_) {}
@@ -72,11 +82,28 @@ export default function App() {
   const setSiSystemDocs = useCallback((v) => {
     setSiSystemDocsState(prev => {
       const resolved = typeof v === "function" ? v(prev) : v;
-      try { _lsSet("gc-si-docs", JSON.stringify(resolved.map(d => ({ ...d })))); dsSave("gc-si-docs", resolved.map(d => ({ ...d, dataUrl: d.dataUrl ? "[STORED]" : null }))).catch(() => {}); } catch (_e) {
+      // FIX BUG-B3 — Ne JAMAIS écrire "[STORED]" comme placeholder dans le localStorage.
+      // L'ancien code remplaçait dataUrl par "[STORED]" en cas de quota → au prochain refresh,
+      // l'UI rechargeait "[STORED]" comme contenu de fichier au lieu du vrai dataUrl.
+      // Nouvelle stratégie : essayer d'écrire le contenu complet, si quota dépassé, écrire
+      // seulement les métadonnées (sans dataUrl) — l'absence de dataUrl est gérée par l'UI
+      // qui re-télécharge depuis le serveur si nécessaire.
+      try {
+        _lsSet("gc-si-docs", JSON.stringify(resolved.map(d => ({ ...d }))));
+      } catch (_e) {
         try {
-          _lsSet("gc-si-docs", JSON.stringify(resolved.map(d => ({ ...d, dataUrl: d.dataUrl ? "[STORED]" : null }))));
+          const lightVersion = resolved.map(d => {
+            const { dataUrl: _du, ...rest } = d;
+            return rest; // pas de dataUrl du tout, plutôt que "[STORED]"
+          });
+          _lsSet("gc-si-docs", JSON.stringify(lightVersion));
         } catch (_) {}
       }
+      // Sync serveur (sans dataUrl pour ne pas saturer SQLite)
+      dsSave("gc-si-docs", resolved.map(d => {
+        const { dataUrl: _du, ...rest } = d;
+        return rest;
+      })).catch(() => {});
       return resolved;
     });
   }, []);
@@ -721,8 +748,14 @@ export default function App() {
 
   useEffect(() => { isDemoModeRef.current = isDemoMode; }, [isDemoMode]);
 
-  // FIX v63 C2  -  Chargement async sécurisé des clés chiffrées au boot
+  // FIX v63 C2  -  Chargement async sécurisé des clés chiffrées au boot.
+  // FIX BUG-B9 — Si l'hydratation serveur est en cours (hydrating=true), on saute
+  // le chargement async chiffré pour éviter le flash visuel (données non-chiffrées
+  // brutes → données déchiffrées → données serveur en 3 frames différents).
+  // L'hydratation serveur fournit la source de vérité ; lsLoadSecure n'est utile
+  // qu'en mode offline pur (pas de connexion serveur).
   useEffect(() => {
+    if (hydrating) return; // attendre la fin de l'hydratation serveur
     (async () => {
       try {
         const [secUsers, secDossiers, secTaches, secLogs] = await Promise.all([
@@ -731,15 +764,22 @@ export default function App() {
           lsLoadSecure("taches", null),
           lsLoadSecure("session-logs", null),
         ]);
-        if (secUsers !== null) { setProdUsers(secUsers); setUsersState(secUsers); }
-        if (secDossiers !== null) { setProdDossiers(secDossiers); setDossiersState(secDossiers); }
-        if (secTaches !== null) { setProdTaches(secTaches); setTachesState(secTaches); }
-        if (secLogs !== null) setSessionLogs(secLogs);
+        // Ne remplacer le state QUE si le state actuel est vide/par défaut
+        // (pour ne pas écraser les données serveur fraîchement hydratées).
+        if (secUsers !== null && (!users || users === INITIAL_USERS || users.length === 0)) {
+          setProdUsers(secUsers); setUsersState(secUsers);
+        }
+        if (secDossiers !== null && (!dossiers || dossiers.length === 0)) {
+          setProdDossiers(secDossiers); setDossiersState(secDossiers);
+        }
+        if (secTaches !== null && (!taches || taches.length === 0)) {
+          setProdTaches(secTaches); setTachesState(secTaches);
+        }
+        if (secLogs !== null && (!sessionLogs || sessionLogs.length === 0)) setSessionLogs(secLogs);
       } catch (_) {}
     })();
-   
-// INTENTIONNEL : chargement sécurisé unique au boot (lsLoadSecure est stable)
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrating]);
 
   const setUsers = useCallback((v) => {
     setUsersState(prev => {
@@ -991,11 +1031,20 @@ export default function App() {
 
   useEffect(() => { lsSave("theme", themeMode); }, [themeMode]);
 
-  const setSiLogoUrl = useCallback((v) => { setSiLogoUrlState(v); dsSave("siLogoUrl", v); }, []);
+  // FIX BUG-B7 — Sauvegarder sur les 2 clés (siLogoUrl + gc-si-logo-url) pour
+  // garantir la propagation entre machines quelle que soit la clé d'écoute.
+  const setSiLogoUrl = useCallback((v) => {
+    setSiLogoUrlState(v);
+    dsSave("siLogoUrl", v);
+    dsSave("gc-si-logo-url", v);
+  }, []);
   const setSiAppearance = useCallback((v) => {
     setSiAppearanceState(prev => {
       const resolved = typeof v === 'function' ? v(prev) : v;
+      // FIX BUG-B7 — Écrire sur les 2 clés pour propagation cross-machine fiable
+      // (certains modules écoutent 'gc-si-appearance', d'autres 'siAppearance').
       dsSave("siAppearance", resolved);
+      dsSave("gc-si-appearance", resolved);
       const root = document.documentElement;
       root.style.setProperty('--gc-primary', resolved.primaryColor || '#C41E3A');
       root.style.setProperty('--gc-navy', resolved.navyColor || '#0A1E4A');
@@ -1129,12 +1178,40 @@ export default function App() {
     if (isDemoMode) { handleExitDemo(); return; }
     if (currentUser) addSessionLog("DECONNEXION", currentUser, { status: "MANUAL", reason: "Déconnexion manuelle" });
     try { _lsRm("gc-active-session"); } catch (_) {}
+    try { _lsRm("gc-jwt-token"); } catch (_) {}
     // FIX vREFRESH — effacer le module sauvegardé : le prochain login repart sur le dashboard
     try { sessionStorage.removeItem('gc-active-module'); } catch (_) {}
     setCurrentUserState(null);
     setIsAdminMode(false);
     setScreen("cover");
   };
+
+  // FIX BUG-B10 — Revalidation périodique du token de session.
+  // Sans cela, un utilisateur reste connecté localement même quand le JWT serveur expire,
+  // et toutes ses requêtes API reçoivent silencieusement des 401.
+  // On vérifie toutes les 5 minutes : si la session locale est invalide → logout propre.
+  useEffect(() => {
+    if (!currentUser || isDemoMode) return;
+    const checkInterval = setInterval(() => {
+      try {
+        const saved = _lsGet("gc-active-session");
+        if (!saved) {
+          // Session disparue → forcer logout
+          handleLogout();
+          return;
+        }
+        const parsed = JSON.parse(saved);
+        if (parsed?.sessionToken && parsed?.userId) {
+          if (!gcValidateSessionToken(parsed.sessionToken, parsed.userId)) {
+            console.warn('[SESSION] Token de session expiré, déconnexion automatique');
+            handleLogout();
+          }
+        }
+      } catch (_) { /* ignore parse errors */ }
+    }, 5 * 60 * 1000); // toutes les 5 minutes
+    return () => clearInterval(checkInterval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, isDemoMode]);
 
   const handleCreateAccountSubmit = (data) => {
     const fn = USER_FUNCTIONS.find(f => f.value === data.func);
