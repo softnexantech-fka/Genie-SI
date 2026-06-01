@@ -351,6 +351,68 @@ export default function App() {
                 try { _lsSet('gc-process-config', JSON.stringify(v)); } catch (_) {}
               }
             }], fallback: {} },
+
+          // ── FIX v160 : Clés critiques manquantes — config cabinet, circuits, organigramme ──
+          // Ces clés sont lues depuis le localStorage par leurs modules respectifs au mount.
+          // Sans ces entrées, les configs faites sur le poste serveur ne se propagent pas.
+          { key: 'gc-cabinet-info',      setters: [(v) => { try { _lsSet('gc-cabinet-info', JSON.stringify(v)); } catch (_) {} }],       fallback: null },
+          { key: 'gc-fiscal-config',     setters: [(v) => { try { _lsSet('gc-fiscal-config', JSON.stringify(v)); } catch (_) {} }],      fallback: null },
+          { key: 'gc-delai-config',      setters: [(v) => { try { _lsSet('gc-delai-config', JSON.stringify(v)); } catch (_) {} }],       fallback: null },
+          { key: 'gc-circuits',          setters: [(v) => { try { _lsSet('gc-circuits', JSON.stringify(v)); } catch (_) {} }],           fallback: [] },
+          { key: 'gc-orgigram-nodes',    setters: [(v) => { try { _lsSet('gc-orgigram-nodes', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-orgigram-links',    setters: [(v) => { try { _lsSet('gc-orgigram-links', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-process-app-matrix',setters: [(v) => { try { _lsSet('gc-process-app-matrix', JSON.stringify(v)); } catch (_) {} }],fallback: null },
+          { key: 'gc-codif-registry',    setters: [(v) => { try { _lsSet('gc-codif-registry', JSON.stringify(v)); } catch (_) {} }],     fallback: {} },
+
+          // ── FIX v160 : Apparence — les clés gc-si-* sont les clés serveur (siAppearance est l'alias LS) ──
+          { key: 'gc-si-appearance',     setters: [(v) => setSiAppearanceState(v)],    fallback: null },
+          { key: 'gc-si-logo-url',       setters: [(v) => setSiLogoUrlState(v)],       fallback: null },
+          { key: 'gc-si-css-overrides',  setters: [(v) => setSiCSSOverridesState(v)],  fallback: null },
+
+          // ── FIX v160 : Documents et fichiers — références perdues sur postes frais ──
+          { key: 'gc-dossier-files',     setters: [(v) => { try { _lsSet('gc-dossier-files', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-standalone-docs',   setters: [(v) => { try { _lsSet('gc-standalone-docs', JSON.stringify(v)); } catch (_) {} }],   fallback: [] },
+          { key: 'standaloneDocuments',  setters: [(v) => { try { _lsSet('standaloneDocuments', JSON.stringify(v)); } catch (_) {} }],  fallback: [] },
+          { key: 'gc-courrier-docs',     setters: [(v) => { try { _lsSet('gc-courrier-docs', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-external-docs',     setters: [(v) => { try { _lsSet('gc-external-docs', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-internal-docs',     setters: [(v) => { try { _lsSet('gc-internal-docs', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-writer-docs',       setters: [(v) => { try { _lsSet('gc-writer-docs', JSON.stringify(v)); } catch (_) {} }],       fallback: [] },
+          { key: 'gc-writer-pro-v2',     setters: [(v) => { try { _lsSet('gc-writer-pro-v2', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-tableur-pro',       setters: [(v) => { try { _lsSet('gc-tableur-pro', JSON.stringify(v)); } catch (_) {} }],       fallback: [] },
+          { key: 'gc-pres-decks-v2',     setters: [(v) => { try { _lsSet('gc-pres-decks-v2', JSON.stringify(v)); } catch (_) {} }],    fallback: [] },
+
+          // ── FIX v160 : Données métier — modules finance, RH, CRM, achat ──
+          { key: 'gc-factures',          setters: [(v) => { try { _lsSet('gc-factures', JSON.stringify(v)); } catch (_) {} }],          fallback: [] },
+          { key: 'gc-devis',             setters: [(v) => { try { _lsSet('gc-devis', JSON.stringify(v)); } catch (_) {} }],             fallback: [] },
+          { key: 'gc-journal',           setters: [(v) => { try { _lsSet('gc-journal', JSON.stringify(v)); } catch (_) {} }],           fallback: [] },
+          { key: 'gc-achats',            setters: [(v) => { try { _lsSet('gc-achats', JSON.stringify(v)); } catch (_) {} }],            fallback: [] },
+          { key: 'gc-demandes',          setters: [(v) => { try { _lsSet('gc-demandes', JSON.stringify(v)); } catch (_) {} }],          fallback: [] },
+          { key: 'gc-kyc-workflows',     setters: [(v) => { try { _lsSet('gc-kyc-workflows', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-leaves',            setters: [(v) => { try { _lsSet('gc-leaves', JSON.stringify(v)); } catch (_) {} }],            fallback: [] },
+          { key: 'gc-recrutements',      setters: [(v) => { try { _lsSet('gc-recrutements', JSON.stringify(v)); } catch (_) {} }],      fallback: [] },
+          { key: 'gc-sirh-presences',    setters: [(v) => { try { _lsSet('gc-sirh-presences', JSON.stringify(v)); } catch (_) {} }],    fallback: [] },
+          { key: 'gc-sirh-evaluations',  setters: [(v) => { try { _lsSet('gc-sirh-evaluations', JSON.stringify(v)); } catch (_) {} }],  fallback: [] },
+          { key: 'gc-sirh-fichiers',     setters: [(v) => { try { _lsSet('gc-sirh-fichiers', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-paie-taux',         setters: [(v) => { try { _lsSet('gc-paie-taux', JSON.stringify(v)); } catch (_) {} }],         fallback: [] },
+          { key: 'gc-paie-transferts',   setters: [(v) => { try { _lsSet('gc-paie-transferts', JSON.stringify(v)); } catch (_) {} }],   fallback: [] },
+          { key: 'gc-crm-interactions',  setters: [(v) => { try { _lsSet('gc-crm-interactions', JSON.stringify(v)); } catch (_) {} }],  fallback: [] },
+          { key: 'gc-crm-opps',          setters: [(v) => { try { _lsSet('gc-crm-opps', JSON.stringify(v)); } catch (_) {} }],          fallback: [] },
+          { key: 'gc-crm-relances',      setters: [(v) => { try { _lsSet('gc-crm-relances', JSON.stringify(v)); } catch (_) {} }],      fallback: [] },
+          { key: 'gc-conventions',       setters: [(v) => { try { _lsSet('gc-conventions', JSON.stringify(v)); } catch (_) {} }],       fallback: [] },
+          { key: 'gc-messages-global',   setters: [(v) => { try { _lsSet('gc-messages-global', JSON.stringify(v)); } catch (_) {} }],   fallback: [] },
+
+          // ── FIX v160 : Compte + actions (AppRoot state setter disponible) ──
+          { key: 'gc-account-actions',   setters: [(v) => { setPendingAccountActions(Array.isArray(v) ? v : []); try { _lsSet('gc-account-actions', JSON.stringify(v)); } catch (_) {} }], fallback: [] },
+
+          // ── FIX v160 : Audit, conformité, risques ──
+          { key: 'gc-audit-actions',     setters: [(v) => { try { _lsSet('gc-audit-actions', JSON.stringify(v)); } catch (_) {} }],     fallback: [] },
+          { key: 'gc-audit-checklist',   setters: [(v) => { try { _lsSet('gc-audit-checklist', JSON.stringify(v)); } catch (_) {} }],   fallback: [] },
+          { key: 'gc-audit-prog',        setters: [(v) => { try { _lsSet('gc-audit-prog', JSON.stringify(v)); } catch (_) {} }],        fallback: [] },
+          { key: 'gc-risks',             setters: [(v) => { try { _lsSet('gc-risks', JSON.stringify(v)); } catch (_) {} }],             fallback: [] },
+          { key: 'gc-nc',                setters: [(v) => { try { _lsSet('gc-nc', JSON.stringify(v)); } catch (_) {} }],                fallback: [] },
+          { key: 'gc-obligations',       setters: [(v) => { try { _lsSet('gc-obligations', JSON.stringify(v)); } catch (_) {} }],       fallback: [] },
+          { key: 'gc-rgpd-traitements',  setters: [(v) => { try { _lsSet('gc-rgpd-traitements', JSON.stringify(v)); } catch (_) {} }],  fallback: [] },
+          { key: 'gc-conseil-opinions',  setters: [(v) => { try { _lsSet('gc-conseil-opinions', JSON.stringify(v)); } catch (_) {} }],  fallback: [] },
         ];
 
         // FIX BUG-B1 — Hydrater 'users' EN PREMIER et explicitement, en synchrone bloquant.
@@ -583,10 +645,10 @@ export default function App() {
             if (serverVal !== null) {
               applyFn(serverVal);
             } else {
-              applyFn(dsLoad(key, fallback));
+              applyFn(lsLoad(key, fallback));
             }
           } catch (_) {
-            applyFn(dsLoad(key, fallback));
+            applyFn(lsLoad(key, fallback));
           }
         }
 
@@ -694,7 +756,7 @@ export default function App() {
             dsGet('gc-standalone-docs', []).then(val => {
               window.dispatchEvent(new CustomEvent('gc:sync-standalone-docs', { detail: Array.isArray(val) ? val : [] }));
             }).catch(() => {
-              window.dispatchEvent(new CustomEvent('gc:sync-standalone-docs', { detail: dsLoad('gc-standalone-docs', []) }));
+              window.dispatchEvent(new CustomEvent('gc:sync-standalone-docs', { detail: lsLoad('gc-standalone-docs', []) }));
             });
             break;
           }

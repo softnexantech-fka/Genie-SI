@@ -628,6 +628,8 @@ export async function dsInitSync() {
     await initWebSocket();
     await flushOfflineQueue();
     console.log('[DS] ✅ Synchronisation SQLite activée');
+    // Signaler à tous les useSyncedState hooks que la connexion est prête → re-fetch serveur
+    try { window.dispatchEvent(new CustomEvent('gc-sync-online')); } catch (_) {}
   } else {
     console.log('[DS] ℹ️  Mode offline — données locales actives');
   }
