@@ -4,6 +4,7 @@
 // ============================================================
 import { _lsGet, _lsSet } from './storage.js';
 import { playSound } from './helpers.js';
+import { gcFileDownload as _gcFileDownload, gcFileUrl as _gcFileUrl } from './filestore.js';
 
 // Calcul des jours restants (copie locale pour éviter dépendance circulaire constants ↔ helpers)
 const _daysLeft = (dateStr) => {
@@ -1365,105 +1366,97 @@ export const gcReadFile = (file, maxMB = 10) => {
   });
 };
 
-// Résolution URL serveur (même logique que filestore._resolveServerUrl)
-function _resolveDocServerUrl(doc) {
+// Normalise un objet "doc" (modules documentaires) en "fileRef" (filestore)
+// Les modules utilisent des noms de champs différents (fileName, name, fileData…)
+// mais filestore attend nom, dataUrl, id, serverUrl, serverId, url, storageType, blob.
+function _docToFileRef(doc) {
   if (!doc) return null;
-  if (doc.serverUrl) return doc.serverUrl;
-  if (doc.serverId)  return `/api/files/${doc.serverId}`;
-  if (doc.storageType === 'server' && doc.url) return doc.url;
-  if (doc.url && typeof doc.url === 'string' && doc.url.startsWith('/api/files/')) return doc.url;
-  if (doc.id && /^F-\d+-/.test(doc.id) && !doc.blob) return `/api/files/${doc.id}`;
-  return null;
-}
-function _getJwtHeader() {
-  try {
-    const token = localStorage.getItem('gc-jwt-token') || localStorage.getItem('authToken') || null;
-    return token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
-  } catch { return {}; }
+  return {
+    id:          doc.id          || doc.fileId || null,
+    nom:         doc.fileName    || doc.nom    || doc.name    || 'document',
+    serverUrl:   doc.serverUrl   || null,
+    serverId:    doc.serverId    || null,
+    url:         doc.url         || null,
+    storageType: doc.storageType || null,
+    blob:        doc.blob        || null,
+    dataUrl:     doc.dataUrl     || doc.fileData || null,
+    fileType:    doc.fileType    || doc.mimeType || doc.fileMime || null,
+  };
 }
 
+function _gcToastError(msg) {
+  if (typeof window === 'undefined') return;
+  if (window.gcToast?.error) { window.gcToast.error(msg); return; }
+  window.dispatchEvent(new CustomEvent('gc-toast', { detail: { message: msg, type: 'error' } }));
+}
+
+// Télécharger un document — délègue à gcFileDownload (filestore.js)
+// Couvre : serverUrl, serverId, url /api/files/…, F-xxx id, IDB cache, dataUrl
 export const gcDownloadDoc = async (doc) => {
-  const serverPath = _resolveDocServerUrl(doc);
-  if (serverPath) {
-    // Préférer URL absolue si le chemin est relatif
-    const base = (() => { try { const h = window.location.hostname; const p = (() => { try { return JSON.parse(localStorage.getItem('gc-ai-proxy-url') || 'null'); } catch { return null; } })(); return p || `${window.location.protocol}//${h}:3001`; } catch { return ''; } })();
-    const url = serverPath.startsWith('http') ? serverPath : `${base}${serverPath}`;
-    try {
-      const r = await fetch(url, { headers: _getJwtHeader() });
-      if (r.ok) {
-        const blob = await r.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = doc.fileName || doc.nom || doc.name || 'document';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
-        return;
-      }
-      console.warn('[gcDownloadDoc] Serveur a refusé :', r.status, url);
-    } catch (err) {
-      console.warn('[gcDownloadDoc] Erreur téléchargement serveur :', err.message);
-    }
-  }
-  // Fallback dataUrl (cache local / offline)
-  if (!doc?.dataUrl) {
-    if (typeof window !== 'undefined' && window.gcToast) { window.gcToast.error("Fichier introuvable — non disponible sur le serveur ni en cache local. Vérifiez que le serveur est démarré et que le fichier a bien été téléversé."); } else { window.dispatchEvent(new CustomEvent('gc-toast', { detail: { message: "Fichier introuvable — non disponible sur le serveur ni en cache local.", type: 'error' } })); }
+  const fileRef = _docToFileRef(doc);
+  if (!fileRef) {
+    _gcToastError("Document invalide — impossible de télécharger.");
     return;
   }
-  try {
-    const a = document.createElement("a");
-    a.href = doc.dataUrl;
-    a.download = doc.fileName || `${(doc.name||'document').replace(/[^a-zA-Z0-9]/g, "_")}.${(doc.fileType || "pdf").toLowerCase()}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } catch (err) {
-    console.warn("Erreur lors du téléchargement : " + err.message);
-  }
-};
-
-export const gcViewDoc = async (doc) => {
-  const serverPath = _resolveDocServerUrl(doc);
-  if (serverPath) {
-    const base = (() => { try { const h = window.location.hostname; const p = (() => { try { return JSON.parse(localStorage.getItem('gc-ai-proxy-url') || 'null'); } catch { return null; } })(); return p || `${window.location.protocol}//${h}:3001`; } catch { return ''; } })();
-    const url = (serverPath.startsWith('http') ? serverPath : `${base}${serverPath}`) + (serverPath.includes('?') ? '&view=1' : '?view=1');
-    try {
-      const r = await fetch(url, { headers: _getJwtHeader() });
-      if (r.ok) {
-        const blob = await r.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, '_blank');
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
-        return;
-      }
-      console.warn('[gcViewDoc] Serveur a refusé :', r.status, url);
-    } catch (err) {
-      console.warn('[gcViewDoc] Erreur lecture serveur :', err.message);
+  // Si fileRef a un id, utiliser le pipeline complet de filestore (serveur + IDB + dataUrl)
+  if (fileRef.id) {
+    const result = await _gcFileDownload(fileRef);
+    if (!result?.ok) {
+      _gcToastError(
+        result?.error ||
+        "Fichier introuvable — le fichier n'est pas disponible sur le serveur ni en cache local. Vérifiez que le serveur est démarré."
+      );
     }
-  }
-  // Fallback dataUrl
-  if (!doc?.dataUrl && !doc?.fileData) {
-    if (typeof window !== 'undefined' && window.gcToast) { window.gcToast.error("Fichier introuvable — non disponible sur le serveur ni en cache local. Vérifiez que le serveur est démarré."); } else { window.dispatchEvent(new CustomEvent('gc-toast', { detail: { message: "Fichier introuvable — non disponible sur le serveur ni en cache local.", type: 'error' } })); }
     return;
   }
-  const src = doc.dataUrl || doc.fileData;
-  const mime = doc.fileType || doc.mimeType || doc.fileMime || '';
-  if (mime.startsWith('image/')) {
-    window.open(src, '_blank');
-  } else {
+  // Pas d'id : fallback direct sur dataUrl
+  if (fileRef.dataUrl) {
     try {
       const a = document.createElement('a');
-      a.href = src;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
+      a.href = fileRef.dataUrl;
+      a.download = fileRef.nom;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
     } catch (err) {
-      console.warn('[gcViewDoc] Erreur ouverture :', err.message);
+      console.warn('[gcDownloadDoc] Erreur fallback dataUrl :', err.message);
     }
+    return;
+  }
+  _gcToastError("Fichier introuvable — aucun identifiant ni cache disponible pour ce document.");
+};
+
+// Consulter (ouvrir) un document — délègue à gcFileUrl (filestore.js)
+export const gcViewDoc = async (doc) => {
+  const fileRef = _docToFileRef(doc);
+  if (!fileRef) {
+    _gcToastError("Document invalide — impossible d'ouvrir.");
+    return;
+  }
+  if (fileRef.id) {
+    const { url, isObjectUrl, error } = await _gcFileUrl(fileRef);
+    if (url) {
+      window.open(url, '_blank');
+      if (isObjectUrl) setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } else {
+      _gcToastError(error || "Fichier introuvable — le fichier n'est pas disponible sur le serveur ni en cache local.");
+    }
+    return;
+  }
+  // Pas d'id : fallback direct sur dataUrl/fileData
+  const src = fileRef.dataUrl;
+  if (!src) {
+    _gcToastError("Fichier introuvable — aucun identifiant ni cache disponible pour ce document.");
+    return;
+  }
+  try {
+    const a = document.createElement('a');
+    a.href = src; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (err) {
+    console.warn('[gcViewDoc] Erreur ouverture fallback :', err.message);
   }
 };
 

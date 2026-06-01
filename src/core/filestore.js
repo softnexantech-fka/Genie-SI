@@ -330,9 +330,11 @@ export async function gcFileLoad(fileRef) {
     return { ...cached, url, local: true };
   }
 
-  // FIX BUG-FILE-1 — Ref trouvé mais introuvable localement ET serveur : retourner un objet
-  // d'erreur explicite pour que l'appelant puisse afficher un message à l'utilisateur
-  // au lieu de ne rien faire silencieusement.
+  // Fallback dataUrl (documents stockés en base64 dans localStorage/serveur)
+  if (fileRef.dataUrl && typeof fileRef.dataUrl === 'string' && fileRef.dataUrl.startsWith('data:')) {
+    return { ...fileRef, url: fileRef.dataUrl, local: true };
+  }
+
   return { ...fileRef, url: null, error: 'Fichier introuvable (ni sur le serveur ni en cache local)', local: false };
 }
 
