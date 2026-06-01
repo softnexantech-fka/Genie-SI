@@ -39,6 +39,16 @@ yarn-debug.log*
 *.db-wal
 *.db-shm
 api-proxy/data/
+api-proxy/old data/
+api-proxy/None/
+api-proxy/origin/
+# Archives sources (inutiles dans git)
+*.zip
+src/ok_src.zip
+src/src\ ok.zip
+src/src.zip
+src/last-ok-src.zip
+src/core/ok.zip
 
 # Fichier de découverte réseau auto-généré (contient IP du serveur maître)
 .env.discovery
