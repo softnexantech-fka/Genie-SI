@@ -1409,7 +1409,7 @@ export const gcDownloadDoc = async (doc) => {
   }
   // Fallback dataUrl (cache local / offline)
   if (!doc?.dataUrl) {
-    alert("Fichier introuvable.\nLe fichier n'est pas disponible sur le serveur ni en cache local.\nVérifiez que le serveur est démarré et que le fichier a bien été téléversé.");
+    if (typeof window !== 'undefined' && window.gcToast) { window.gcToast.error("Fichier introuvable — non disponible sur le serveur ni en cache local. Vérifiez que le serveur est démarré et que le fichier a bien été téléversé."); } else { window.dispatchEvent(new CustomEvent('gc-toast', { detail: { message: "Fichier introuvable — non disponible sur le serveur ni en cache local.", type: 'error' } })); }
     return;
   }
   try {
@@ -1445,7 +1445,7 @@ export const gcViewDoc = async (doc) => {
   }
   // Fallback dataUrl
   if (!doc?.dataUrl && !doc?.fileData) {
-    alert("Fichier introuvable.\nLe fichier n'est pas disponible sur le serveur ni en cache local.\nVérifiez que le serveur est démarré.");
+    if (typeof window !== 'undefined' && window.gcToast) { window.gcToast.error("Fichier introuvable — non disponible sur le serveur ni en cache local. Vérifiez que le serveur est démarré."); } else { window.dispatchEvent(new CustomEvent('gc-toast', { detail: { message: "Fichier introuvable — non disponible sur le serveur ni en cache local.", type: 'error' } })); }
     return;
   }
   const src = doc.dataUrl || doc.fileData;

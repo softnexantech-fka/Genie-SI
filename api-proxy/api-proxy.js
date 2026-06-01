@@ -1017,10 +1017,18 @@ io.on('connection', (socket) => {
         }
       } catch(e) {
         console.error('[flush] Transaction error:', e.message);
-        await doFlush();
+        try { await doFlush(); } catch(doFlushErr) {
+          // TASK6 FIX: propager l'erreur au client au lieu de la swallower
+          socket.emit('flush_result', { ok: false, synced: 0, error: doFlushErr.message });
+          return;
+        }
       }
     } else {
-      await doFlush();
+      try { await doFlush(); } catch(e) {
+        // TASK6 FIX: propager l'erreur au client
+        socket.emit('flush_result', { ok: false, synced: 0, error: e.message });
+        return;
+      }
     }
 
     socket.emit('flush_result', { synced, total: batch.length });
@@ -1318,8 +1326,9 @@ const ADMIN_ONLY_WRITE_KEYS = new Set([
 ]);
 
 // [FIX v154] Vérifier si une clé nécessite l'authentification
+// TASK4 FIX: n'inclure que CRITICAL_EMPTY_ARRAY_KEYS — ADMIN_ONLY_WRITE_KEYS bloque les GET légitimes
 function requiresAuthenticationForKey(key) {
-  return CRITICAL_EMPTY_ARRAY_KEYS.has(key) || ADMIN_ONLY_WRITE_KEYS.has(key);
+  return CRITICAL_EMPTY_ARRAY_KEYS.has(key);
 }
 
 function ensureAuthForKey(req, res, key) {
@@ -1536,7 +1545,8 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
       // lors des sauvegardes partielles.
       const isAdminCall = (req.user?.level || 0) >= 6 || req.user?.isAdmin;
       const requestPrune = req.headers['x-prune-users'] === '1' && isAdminCall;
-      if (requestPrune && (key === 'users' || key === 'gc-users') && Array.isArray(writeValue)) {
+      // TASK5 FIX: ne pruner que si existingGcUsers et writeValue ont tous deux des entrées
+      if (requestPrune && existingGcUsers.length > 0 && Array.isArray(writeValue) && writeValue.length > 0 && (key === 'users' || key === 'gc-users')) {
         const incomingIds = new Set(writeValue.map(u => u?.id).filter(Boolean));
         const before = existingGcUsers.length;
         existingGcUsers = existingGcUsers.filter(g => incomingIds.has(g.id));
@@ -2025,6 +2035,42 @@ app.post('/api/email', rateLimiter(3, 60_000), authenticateToken, async (req, re
 });
 
 // ── Backup ───────────────────────────────────────────────────────────────────
+
+// TASK1 — SQLite daily backup via better-sqlite3 .backup() API
+async function runBackup() {
+  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const filename = `genie_si_backup_${date}.db`;
+  const filepath = path.join(BACKUP_DIR, filename);
+  console.log(`[Backup] Démarrage backup SQLite → ${filename}`);
+  try {
+    if (!dbReady || dbMode !== 'better-sqlite3') {
+      // Fallback JSON pour les modes non-better-sqlite3
+      const allData = dbReady ? await dbGetAll() : jsonLoad();
+      const content = JSON.stringify({ version: PROXY_VERSION, created_at: new Date().toISOString(), data: allData }, null, 2);
+      fs.writeFileSync(filepath, content, 'utf8');
+    } else {
+      await db.backup(filepath);
+    }
+    const size = fs.existsSync(filepath) ? fs.statSync(filepath).size : 0;
+    console.log(`[Backup] ✅ Backup réussi : ${filename} (${Math.round(size / 1024)} KB)`);
+
+    // Garder seulement les 7 derniers backups journaliers
+    try {
+      const backupFiles = fs.readdirSync(BACKUP_DIR)
+        .filter(f => /^genie_si_backup_\d{4}-\d{2}-\d{2}\./.test(f))
+        .sort();
+      for (const old of backupFiles.slice(0, Math.max(0, backupFiles.length - 7))) {
+        try { fs.unlinkSync(path.join(BACKUP_DIR, old)); console.log(`[Backup] Rotation : supprimé ${old}`); } catch (_) {}
+      }
+    } catch (_) {}
+
+    return { file: filename, size };
+  } catch (e) {
+    console.error(`[Backup] ❌ Erreur backup : ${e.message}`);
+    throw e;
+  }
+}
+
 async function createBackup(label = 'auto', userId = 'system') {
   const ts       = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `backup_${label}_${ts}.json`;
@@ -2117,6 +2163,20 @@ app.post('/api/backup/restore/:filename', rateLimiter(2, 60_000), authenticateTo
     broadcast('full_restore', { filename, restored, skipped, emergency: emergencyFilename, ts: Date.now() });
     res.json({ ok: true, restored, skipped, filename, emergency: emergencyFilename });
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// TASK1 — GET /api/admin/backup : déclenche un backup immédiat (admin JWT requis, level >= 6)
+app.get('/api/admin/backup', rateLimiter(5, 60_000), authenticateToken, async (req, res) => {
+  if ((req.user?.level || 0) < 6 && !req.user?.isAdmin) {
+    return res.status(403).json({ error: 'Niveau Admin (6) requis pour déclencher un backup' });
+  }
+  try {
+    const result = await runBackup();
+    await auditLog(req.user?.id || 'system', 'MANUAL_BACKUP', 'backup', result.file, req.ip);
+    res.json({ ok: true, file: result.file, size: result.size });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // ── Clients connectés ────────────────────────────────────────────────────────
@@ -2277,6 +2337,12 @@ async function start() {
       console.log('💾 Backup automatique effectué');
     } catch(e) { console.warn('⚠️  Backup auto échoué:', e.message); }
   }, 6 * 60 * 60 * 1000);
+
+  // TASK1 — Backup SQLite journalier : immédiat au démarrage puis toutes les 24h
+  try { await runBackup(); } catch (_) {}
+  setInterval(async () => {
+    try { await runBackup(); } catch (_) {}
+  }, 24 * 60 * 60 * 1000);
 
   // [FIX-BOOT] Bootstrap gc-users depuis 'users' si des comptes manquent (premier démarrage)
   try {
