@@ -1365,15 +1365,31 @@ export const gcReadFile = (file, maxMB = 10) => {
   });
 };
 
+// Résolution URL serveur (même logique que filestore._resolveServerUrl)
+function _resolveDocServerUrl(doc) {
+  if (!doc) return null;
+  if (doc.serverUrl) return doc.serverUrl;
+  if (doc.serverId)  return `/api/files/${doc.serverId}`;
+  if (doc.storageType === 'server' && doc.url) return doc.url;
+  if (doc.url && typeof doc.url === 'string' && doc.url.startsWith('/api/files/')) return doc.url;
+  if (doc.id && /^F-\d+-/.test(doc.id) && !doc.blob) return `/api/files/${doc.id}`;
+  return null;
+}
+function _getJwtHeader() {
+  try {
+    const token = localStorage.getItem('gc-jwt-token') || localStorage.getItem('authToken') || null;
+    return token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
+  } catch { return {}; }
+}
+
 export const gcDownloadDoc = async (doc) => {
-  // FIX v152 — Priorité au serverUrl (fichier stocké sur le serveur)
-  if (doc?.serverUrl || doc?.serverId) {
-    const url = doc.serverUrl || `/api/files/${doc.serverId}`;
+  const serverPath = _resolveDocServerUrl(doc);
+  if (serverPath) {
+    // Préférer URL absolue si le chemin est relatif
+    const base = (() => { try { const h = window.location.hostname; const p = (() => { try { return JSON.parse(localStorage.getItem('gc-ai-proxy-url') || 'null'); } catch { return null; } })(); return p || `${window.location.protocol}//${h}:3001`; } catch { return ''; } })();
+    const url = serverPath.startsWith('http') ? serverPath : `${base}${serverPath}`;
     try {
-      // Récupérer le token JWT depuis localStorage
-      const token = (() => { try { return localStorage.getItem('gc-jwt-token') || localStorage.getItem('authToken') || null; } catch { return null; } })();
-      const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
-      const r = await fetch(url, { headers });
+      const r = await fetch(url, { headers: _getJwtHeader() });
       if (r.ok) {
         const blob = await r.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -1386,13 +1402,14 @@ export const gcDownloadDoc = async (doc) => {
         setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
         return;
       }
+      console.warn('[gcDownloadDoc] Serveur a refusé :', r.status, url);
     } catch (err) {
       console.warn('[gcDownloadDoc] Erreur téléchargement serveur :', err.message);
     }
   }
   // Fallback dataUrl (cache local / offline)
   if (!doc?.dataUrl) {
-    console.warn("⚠️ Aucun fichier disponible pour ce document.\nL'administrateur doit d'abord téléverser le fichier.");
+    alert("Fichier introuvable.\nLe fichier n'est pas disponible sur le serveur ni en cache local.\nVérifiez que le serveur est démarré et que le fichier a bien été téléversé.");
     return;
   }
   try {
@@ -1407,15 +1424,13 @@ export const gcDownloadDoc = async (doc) => {
   }
 };
 
-// FIX v152 — gcViewDoc : ouvrir un fichier en lecture (onglet ou modal)
 export const gcViewDoc = async (doc) => {
-  // Priorité au serverUrl
-  if (doc?.serverUrl || doc?.serverId) {
-    const url = doc.serverUrl || `/api/files/${doc.serverId}`;
+  const serverPath = _resolveDocServerUrl(doc);
+  if (serverPath) {
+    const base = (() => { try { const h = window.location.hostname; const p = (() => { try { return JSON.parse(localStorage.getItem('gc-ai-proxy-url') || 'null'); } catch { return null; } })(); return p || `${window.location.protocol}//${h}:3001`; } catch { return ''; } })();
+    const url = (serverPath.startsWith('http') ? serverPath : `${base}${serverPath}`) + (serverPath.includes('?') ? '&view=1' : '?view=1');
     try {
-      const token = (() => { try { return localStorage.getItem('gc-jwt-token') || localStorage.getItem('authToken') || null; } catch { return null; } })();
-      const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
-      const r = await fetch(url, { headers });
+      const r = await fetch(url, { headers: _getJwtHeader() });
       if (r.ok) {
         const blob = await r.blob();
         const blobUrl = URL.createObjectURL(blob);
@@ -1423,19 +1438,19 @@ export const gcViewDoc = async (doc) => {
         setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
         return;
       }
+      console.warn('[gcViewDoc] Serveur a refusé :', r.status, url);
     } catch (err) {
       console.warn('[gcViewDoc] Erreur lecture serveur :', err.message);
     }
   }
   // Fallback dataUrl
   if (!doc?.dataUrl && !doc?.fileData) {
-    console.warn("⚠️ Aucun fichier disponible pour la lecture.");
+    alert("Fichier introuvable.\nLe fichier n'est pas disponible sur le serveur ni en cache local.\nVérifiez que le serveur est démarré.");
     return;
   }
   const src = doc.dataUrl || doc.fileData;
   const mime = doc.fileType || doc.mimeType || doc.fileMime || '';
   if (mime.startsWith('image/')) {
-    // Pour les images, ouvrir dans un onglet
     window.open(src, '_blank');
   } else {
     try {
