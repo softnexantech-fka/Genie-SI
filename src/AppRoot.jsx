@@ -1395,6 +1395,7 @@ export default function App() {
         <DialogProvider T={T}>
         <LoginPage
           users={users}
+          setUsers={setUsers}
           isAdminMode={isAdminMode}
           onLogin={handleLogin}
           onCreateAccount={() => setScreen("create")}

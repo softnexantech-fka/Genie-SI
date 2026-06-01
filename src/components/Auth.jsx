@@ -483,7 +483,7 @@ export function LoginPage(props) {
   const gcAlert   = (msg, title, icon) => _dlg.alert(msg, title, icon);
   const gcConfirm = (msg, title, icon, danger) => _dlg.confirm(msg, title, icon, danger);
   const gcPrompt  = (msg, def, title, icon) => _dlg.prompt(msg, def, title, icon);
-  const { users, isAdminMode, onLogin, onCreateAccount, onBack, onAccessDemo, T, pendingConnections, setPendingConnections, isFirstTime, pendingApprovals, onSessionLog, requireConnApproval, siSystemDocs, siAppearance, siLogoUrl } = props;
+  const { users, setUsers, isAdminMode, onLogin, onCreateAccount, onBack, onAccessDemo, T, pendingConnections, setPendingConnections, isFirstTime, pendingApprovals, onSessionLog, requireConnApproval, siSystemDocs, siAppearance, siLogoUrl } = props;
   const _loginUsers0 = isAdminMode ? users.filter(u => _activeUser(u)&&u.isAdmin) : users.filter(u => _activeUser(u)&&!u.isAdmin);
   // FIX v63  -  Pré-sélectionner le compte DG s'il existe, sinon premier non-admin
   const _defaultUserId = isAdminMode
@@ -700,6 +700,20 @@ export function LoginPage(props) {
         _lsSet('gc-jwt-token', loginData.token);
         console.log('[AUTH] ✅ JWT token stored for API authentication');
 
+        // Re-sync users with full data (incl. passwordHash) now that the JWT is available.
+        // On a fresh machine, the pre-login fetch returned stripped users (no passwordHash).
+        // We need the full profile for admin operations and password changes.
+        try {
+          const { dsGet: _dsGet } = await import('../core/datastore.js');
+          const { lsSave: _lsSave } = await import('../core/storage.js');
+          const fullUsers = await _dsGet('users', null);
+          if (Array.isArray(fullUsers) && fullUsers.length > 0) {
+            _lsSave('users', fullUsers);
+            if (setUsers) setUsers(fullUsers);
+            console.log('[AUTH] ✅ Users re-sync complet post-login (hashes restaurés)');
+          }
+        } catch (_) {}
+
       } catch (backendError) {
         console.error('[AUTH] Backend login error:', backendError);
         // Continue with local login for now, but log the issue
@@ -823,6 +837,11 @@ export function LoginPage(props) {
     if (isAdminMode) {
       // FIX v123 — Passer le storedHash de l'user pour que gcVerifyAdmin fonctionne
       // indépendamment du contexte crypto (HTTPS ou HTTP/fallback)
+      if (!expectedPwdOrHash) {
+        // Hash absent (client non encore authentifié) → déléguer au serveur
+        proceedLogin(user);
+        return;
+      }
       gcVerifyAdmin(userId, password, user.passwordHash).then(adminOk => {
         if (!adminOk) {
           setError("Mot de passe administrateur incorrect."); playSound("alarm");
@@ -834,8 +853,8 @@ export function LoginPage(props) {
       return;
     } else {
       if (!expectedPwdOrHash) {
-        setError("Aucun mot de passe défini pour ce compte. Contactez l'Admin."); playSound("alarm");
-        if (onSessionLog) onSessionLog("TENTATIVE", user, { status:"FAILED", reason:"Aucun mot de passe défini" });
+        // Hash absent (réponse serveur anonyme sans passwordHash) → le serveur vérifie le mot de passe
+        proceedLogin(user);
         return;
       }
       gcVerifyPassword(password, expectedPwdOrHash).then(pwdOk => {

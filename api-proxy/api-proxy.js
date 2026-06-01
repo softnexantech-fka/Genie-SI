@@ -980,10 +980,10 @@ io.on('connection', (socket) => {
         if (!item?.key || !isAllowedKey(item.key)) continue;
         if (item.value === undefined || item.value === null) continue;
         const validated = validateAndSanitizeValue(item.key, item.value);
-        if (!validated.ok) continue;
-        const valJson = JSON.stringify(validated.value);
+        if (!validated.valid) continue;
+        const valJson = JSON.stringify(validated.sanitized);
         if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
-        const ok = await dbSet(item.key, validated.value, verifiedUserId);
+        const ok = await dbSet(item.key, validated.sanitized, verifiedUserId);
         if (ok) {
           synced++;
           broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now() }, socket.id);
@@ -998,8 +998,8 @@ io.on('connection', (socket) => {
             if (!item?.key || !isAllowedKey(item.key)) continue;
             if (item.value === undefined || item.value === null) continue;
             const vr = validateAndSanitizeValue(item.key, item.value);
-            if (!vr.ok) continue;
-            const val = JSON.stringify(vr.value);
+            if (!vr.valid) continue;
+            const val = JSON.stringify(vr.sanitized);
             if (Buffer.byteLength(val, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
             const ts = Math.floor(Date.now() / 1000);
             db.prepare(
@@ -1319,8 +1319,12 @@ function requiresAuthenticationForKey(key) {
 }
 
 function ensureAuthForKey(req, res, key) {
-  // Lecture seule des clés CRITICAL_EMPTY_ARRAY_KEYS exige juste authentification
-  if (CRITICAL_EMPTY_ARRAY_KEYS.has(key)) {
+  // Lecture seule des clés CRITICAL_EMPTY_ARRAY_KEYS exige juste authentification.
+  // Exception : 'users' est lisible sans JWT pour permettre l'affichage de l'écran
+  // de connexion sur des postes frais (localStorage vide). Les champs sensibles
+  // (passwordHash, password, passwordHistory) sont retirés de la réponse dans le
+  // handler GET pour les clients anonymes.
+  if (CRITICAL_EMPTY_ARRAY_KEYS.has(key) && key !== 'users') {
     if (!req.user || req.user.role === 'GUEST') {
       res.status(401).json({ error: 'Authentification requise pour cette ressource' });
       return false;
@@ -1376,6 +1380,12 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
         return res.status(500).json({ ok: false, error: 'Données corrompues sur le serveur', key, corrupt: true });
       }
       if (value === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
+      // Masquer les champs sensibles pour les clients non authentifiés sur la clé 'users'
+      const isAnon = !req.user || req.user.role === 'GUEST';
+      if (key === 'users' && isAnon && Array.isArray(value)) {
+        const stripped = value.map(({ passwordHash, password, passwordHistory, ...safe }) => safe);
+        return res.json({ ok: true, key, value: stripped });
+      }
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
       return res.json({ ok: true, key, value });
     }
