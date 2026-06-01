@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+api-proxy/node_modules/
+
+# Build output
+dist/
+dist-ssr/
+build/
+
+# Environment (ne jamais committer les clés API!)
+.env
+.env.local
+.env.production
+api-proxy/.env
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Vite
+.vite/
+
+# Cache
+.eslintcache
+
+# Base de données SQLite (données sensibles — ne JAMAIS committer)
+*.db
+*.db-wal
+*.db-shm
+api-proxy/data/
+
+# Fichier de découverte réseau auto-généré (contient IP du serveur maître)
+.env.discovery
+.server-config.json
+
+# Backups locaux
+api-proxy/data/backups/
+
+# Rapports de test
+test-results/
+playwright-report/

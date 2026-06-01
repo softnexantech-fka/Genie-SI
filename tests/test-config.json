@@ -1,0 +1,311 @@
+{
+  "version": "1.0.0",
+  "description": "Configuration dynamique pour les tests E2E du SI",
+  "modules": {
+    "auth": {
+      "enabled": true,
+      "description": "Tests d'authentification et gestion des rôles",
+      "file": "si-e2e-auth.spec.ts",
+      "tests": [
+        "Login DG - Accès TOTAL",
+        "Login Admin - Accès restreint",
+        "Login Collaborateur - Accès limité",
+        "Login Client - Accès ultra-limité",
+        "Login Audit - Accès lectures",
+        "Session expiration handling",
+        "Déconnexion & logout"
+      ]
+    },
+    "admin": {
+      "enabled": true,
+      "description": "Tests d'administration système complète",
+      "file": "si-e2e-admin.spec.ts",
+      "tests": [
+        "Ajouter collaborateur",
+        "Modifier rôle",
+        "Supprimer collaborateur",
+        "Organigramme correct",
+        "Gestion comptes utilisateurs",
+        "Panel collaborateurs",
+        "Demandes et validations",
+        "Informations système"
+      ]
+    },
+    "documents": {
+      "enabled": true,
+      "description": "Tests de gestion documentaire complète",
+      "file": "si-e2e-documents.spec.ts",
+      "tests": [
+        "Créer dossier",
+        "Partager dossier",
+        "Upload document",
+        "Workflow signature complet",
+        "Archivage sécurisé",
+        "Codification automatique",
+        "Gestion accès par rôle",
+        "Historique versions"
+      ]
+    },
+    "finance": {
+      "enabled": true,
+      "description": "Tests des opérations financières",
+      "file": "si-e2e-finance.spec.ts",
+      "tests": [
+        "Créer facture",
+        "Validation montant > 0",
+        "Signature facture",
+        "Note d'honoraires",
+        "Archivage post-signature",
+        "Restriction: Client NE crée facture"
+      ]
+    },
+    "bureautique": {
+      "enabled": true,
+      "description": "Tests suite bureautique intégrée",
+      "file": "si-e2e-bureautique.spec.ts",
+      "tests": [
+        "Budget Rapide - Calculs automatiques",
+        "Bureau Office - Édition collaborative",
+        "Formulaires - Création et validation",
+        "Gestion Rapide - Tableaux de bord",
+        "Presentation Pro - Slides dynamiques",
+        "Tableur Pro - Formules avancées",
+        "Writer Pro - Traitement de texte"
+      ]
+    },
+    "juridique": {
+      "enabled": true,
+      "description": "Tests module juridique complet",
+      "file": "si-e2e-juridique.spec.ts",
+      "tests": [
+        "Rédaction contrats",
+        "Analyse juridique automatisée",
+        "Gestion contentieux",
+        "Archivage juridique",
+        "Consultation base de données",
+        "Rapports juridiques"
+      ]
+    },
+    "sirh": {
+      "enabled": true,
+      "description": "Tests système RH intégré",
+      "file": "si-e2e-sirh.spec.ts",
+      "tests": [
+        "Gestion employés",
+        "Paie et rémunération",
+        "Formation et compétences",
+        "Évaluation performance",
+        "Planning RH",
+        "Recrutement"
+      ]
+    },
+    "audit": {
+      "enabled": true,
+      "description": "Tests module audit et conformité",
+      "file": "si-e2e-audit.spec.ts",
+      "tests": [
+        "Audit processus métier",
+        "Contrôle conformité",
+        "Rapports d'audit",
+        "Traçabilité actions",
+        "Alertes conformité",
+        "Archivage audit"
+      ]
+    },
+    "conformite": {
+      "enabled": true,
+      "description": "Tests conformité réglementaire",
+      "file": "si-e2e-conformite.spec.ts",
+      "tests": [
+        "Contrôle RGPD",
+        "Conformité fiscale",
+        "Sécurité données",
+        "Audit trails",
+        "Reporting conformité",
+        "Gestion risques"
+      ]
+    },
+    "communication": {
+      "enabled": true,
+      "description": "Tests communication d'entreprise",
+      "file": "si-e2e-communication.spec.ts",
+      "tests": [
+        "Campagnes marketing",
+        "Communication interne",
+        "Gestion réseaux sociaux",
+        "Newsletters",
+        "Événements entreprise",
+        "Relations presse"
+      ]
+    },
+    "logistique": {
+      "enabled": true,
+      "description": "Tests gestion logistique",
+      "file": "si-e2e-logistique.spec.ts",
+      "tests": [
+        "Gestion stocks",
+        "Commandes fournisseurs",
+        "Livraisons clients",
+        "Optimisation chaînes",
+        "Suivi transport",
+        "Gestion entrepôts"
+      ]
+    },
+    "conseil": {
+      "enabled": true,
+      "description": "Tests module conseil stratégique",
+      "file": "si-e2e-conseil.spec.ts",
+      "tests": [
+        "Études de marché",
+        "Conseil stratégique",
+        "Business plans",
+        "Analyses financières",
+        "Recommandations",
+        "Suivi projets"
+      ]
+    },
+    "messagerie": {
+      "enabled": true,
+      "description": "Tests de messagerie unifiée",
+      "file": "si-e2e-messaging.spec.ts",
+      "tests": [
+        "Envoyer message",
+        "Notification reçue",
+        "Historique messages",
+        "Suppression message",
+        "Conversation persistance"
+      ]
+    },
+    "agenda": {
+      "enabled": true,
+      "description": "Tests gestion agenda et planning",
+      "file": "si-e2e-agenda.spec.ts",
+      "tests": [
+        "Planification rendez-vous",
+        "Calendrier partagé",
+        "Rappels automatiques",
+        "Synchronisation équipes",
+        "Gestion conflits",
+        "Exports calendrier"
+      ]
+    },
+    "dashboard": {
+      "enabled": true,
+      "description": "Tests tableaux de bord et indicateurs",
+      "file": "si-e2e-dashboard.spec.ts",
+      "tests": [
+        "Dashboard principal",
+        "Indicateurs KPI",
+        "Cartes processus",
+        "Métriques temps réel",
+        "Exports données",
+        "Personnalisation vues"
+      ]
+    },
+    "taches": {
+      "enabled": true,
+      "description": "Tests gestion des tâches",
+      "file": "si-e2e-taches.spec.ts",
+      "tests": [
+        "Création tâches",
+        "Assignation équipe",
+        "Suivi progression",
+        "Échéances et rappels",
+        "Priorisation",
+        "Rapports tâches"
+      ]
+    },
+    "rapports": {
+      "enabled": true,
+      "description": "Tests génération rapports d'activité",
+      "file": "si-e2e-rapports.spec.ts",
+      "tests": [
+        "Rapports activité",
+        "Statistiques usage",
+        "Exports PDF/Excel",
+        "Filtres personnalisés",
+        "Programmation rapports",
+        "Archivage rapports"
+      ]
+    },
+    "approvals": {
+      "enabled": true,
+      "description": "Tests des workflows d'approbation",
+      "file": "si-e2e-approvals.spec.ts",
+      "tests": [
+        "Créer demande approbation",
+        "Admin approuve → passe à DG",
+        "Rejeter demande",
+        "DG approuve définitivement",
+        "Restriction: Client NE voit pas"
+      ]
+    },
+    "security": {
+      "enabled": true,
+      "description": "Tests de sécurité et gestion d'erreurs",
+      "file": "si-e2e-errors-security.spec.ts",
+      "tests": [
+        "Email invalide rejeté",
+        "Mot de passe incorrect",
+        "Montant négatif rejeté",
+        "Accès refusé cross-user",
+        "Signature: PIN incorrect",
+        "Data integrity: décimal préservé",
+        "Brute force limité",
+        "XSS bloqué"
+      ]
+    },
+    "workflows": {
+      "enabled": true,
+      "description": "Tests de workflows complets end-to-end",
+      "file": "si-e2e-workflows-complete.spec.ts",
+      "tests": [
+        "WF1: Dossier juridique complet",
+        "WF2: Facture à l'archivage",
+        "WF3: Approbation multi-niveaux",
+        "WF4: Messagerie avec réponses"
+      ]
+    }
+  },
+  "browsers": {
+    "primary": "msedge",
+    "secondary": ["chromium", "firefox"]
+  },
+  "users": {
+    "dg": {
+      "role": "DG",
+      "permissions": ["all"]
+    },
+    "admin": {
+      "role": "Admin",
+      "permissions": ["manage_users", "view_reports"]
+    },
+    "collaborateur": {
+      "role": "Collaborateur",
+      "permissions": ["create_docs", "view_own"]
+    },
+    "client": {
+      "role": "Client",
+      "permissions": ["view_assigned", "sign_docs"]
+    },
+    "audit": {
+      "role": "Audit",
+      "permissions": ["view_all", "audit_logs"]
+    }
+  },
+  "features": {
+    "encryption": true,
+    "jwt_sessions": true,
+    "role_based_access": true,
+    "document_sharing": true,
+    "approval_cascades": true,
+    "messaging": true,
+    "finance_operations": true
+  },
+  "settings": {
+    "timeout": 30000,
+    "retries": 2,
+    "headless": true,
+    "parallel": false
+  }
+}
