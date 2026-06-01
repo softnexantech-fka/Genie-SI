@@ -235,10 +235,21 @@ const ALLOWED_KEYS = new Set([
 ]);
 
 // [C3][C9] Validation clé autorisée — préfixes dynamiques inclus
+// FIX BUG-B13 — Validation stricte de longueur + format des clés dynamiques pour
+// éviter qu'un utilisateur malveillant remplisse SQLite avec des milliers de clés
+// gc-notif-XXX différentes (DoS) ou tente une path traversal via la clé.
+const KEY_MAX_LENGTH = 80;
+const NOTIF_SUFFIX_RE = /^[A-Za-z0-9_-]{1,64}$/;
 function isAllowedKey(key) {
   if (!key || typeof key !== 'string') return false;
+  if (key.length > KEY_MAX_LENGTH) return false;
+  // Bloquer caractères dangereux (/, \, .., null bytes, etc.)
+  if (/[\/\\\x00]/.test(key) || key.includes('..')) return false;
   if (ALLOWED_KEYS.has(key)) return true;
-  if (key.startsWith('gc-notif-')) return true;
+  if (key.startsWith('gc-notif-')) {
+    const suffix = key.slice('gc-notif-'.length);
+    return NOTIF_SUFFIX_RE.test(suffix);
+  }
   return false;
 }
 
@@ -582,8 +593,22 @@ async function dbGet(key) {
       row = db.prepare('SELECT value FROM si_data WHERE key = ?').get(key);
     }
     if (!row) return null; // clé absente → null propre
-    return JSON.parse(row.value);
+    // FIX BUG-B15 — Distinguer "non trouvé" (null) de "données corrompues" (throw).
+    // Si JSON.parse échoue, on log + alerte et on throw pour que l'appelant puisse
+    // répondre 500 au client au lieu de masquer la corruption en répondant 404.
+    try {
+      return JSON.parse(row.value);
+    } catch (parseErr) {
+      const errMsg = `[dbGet] DONNÉES CORROMPUES pour clé "${key}": ${parseErr.message}`;
+      console.error(errMsg);
+      // Marquer dans l'audit log pour investigation
+      try { auditLog('system', 'CORRUPTION', key, errMsg, 'server').catch(() => {}); } catch (_) {}
+      const e = new Error(errMsg);
+      e.code = 'CORRUPT_DATA';
+      throw e;
+    }
   } catch(e) {
+    if (e.code === 'CORRUPT_DATA') throw e; // remonter les corruptions
     console.error(`[dbGet] Erreur pour clé "${key}":`, e.message);
     return null;
   }
@@ -1262,16 +1287,49 @@ const CRITICAL_EMPTY_ARRAY_KEYS = new Set([
   'gc-users','users','gc-dossiers','dossiers','gc-taches','taches','gc-rdvs','rdvs','gc-partners','partners'
 ]);
 
+// FIX BUG-B18 — Clés de configuration globale qui ne doivent être modifiables
+// QUE par un admin (level >= 6) ou un manager (level >= 4). Sans ce garde, un
+// collaborateur niveau 1 pouvait modifier le nom du cabinet, la config fiscale,
+// la matrice d'accès aux processus, etc. via un appel POST direct à /api/data/:key.
+const ADMIN_ONLY_WRITE_KEYS = new Set([
+  'gc-cabinet-info',
+  'gc-fiscal-config',
+  'gc-delai-config',
+  'gc-process-config',
+  'gc-process-app-matrix',
+  'gc-app-habilitations',
+  'gc-app-access-codes',
+  'gc-require-conn-approval',
+  'gc-si-appearance', 'siAppearance',
+  'gc-si-logo-url', 'siLogoUrl',
+  'gc-si-css-overrides', 'siCSSOverrides',
+  'gc-circuits',
+  'gc-orgigram-nodes', 'gc-orgigram-links',
+  'gc-codif-registry',
+]);
+
 // [FIX v154] Vérifier si une clé nécessite l'authentification
 function requiresAuthenticationForKey(key) {
-  return CRITICAL_EMPTY_ARRAY_KEYS.has(key);
+  return CRITICAL_EMPTY_ARRAY_KEYS.has(key) || ADMIN_ONLY_WRITE_KEYS.has(key);
 }
 
 function ensureAuthForKey(req, res, key) {
-  if (!requiresAuthenticationForKey(key)) return true;
-  if (!req.user || req.user.role === 'GUEST') {
-    res.status(401).json({ error: 'Authentification requise pour cette ressource' });
-    return false;
+  // Lecture seule des clés CRITICAL_EMPTY_ARRAY_KEYS exige juste authentification
+  if (CRITICAL_EMPTY_ARRAY_KEYS.has(key)) {
+    if (!req.user || req.user.role === 'GUEST') {
+      res.status(401).json({ error: 'Authentification requise pour cette ressource' });
+      return false;
+    }
+  }
+  // FIX BUG-B18 — Écriture sur clés admin-only exige niveau >= 4 (manager+)
+  if (ADMIN_ONLY_WRITE_KEYS.has(key) && req.method !== 'GET') {
+    const lvl = req.user?.level || 0;
+    const isAdmin = req.user?.isAdmin || lvl >= 6;
+    const isManager = lvl >= 4;
+    if (!isAdmin && !isManager) {
+      res.status(403).json({ error: 'Niveau Manager (4+) ou Admin requis pour modifier la configuration' });
+      return false;
+    }
   }
   return true;
 }
@@ -1305,7 +1363,13 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
     }
 
     if (dbReady) {
-      const value = await dbGet(key);
+      let value;
+      try {
+        value = await dbGet(key);
+      } catch (corruptErr) {
+        // FIX BUG-B15 — Corruption détectée → 500 explicite (client gère et alerte)
+        return res.status(500).json({ ok: false, error: 'Données corrompues sur le serveur', key, corrupt: true });
+      }
       if (value === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
       return res.json({ ok: true, key, value });

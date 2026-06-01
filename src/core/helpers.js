@@ -516,9 +516,24 @@ export const gcAntiRedondance = {
   check: (type, entityId, metadata = {}) => {
     const data = gcAntiRedondance._load();
     const fingerprint = `${type}::${entityId}`;
-    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
-    if (data[fingerprint] && new Date(data[fingerprint].at).getTime() > cutoff) {
-      return { allowed: false, existing: data[fingerprint] };
+    const now = Date.now();
+    const cutoff = now - 90 * 24 * 60 * 60 * 1000;
+    const entry = data[fingerprint];
+    if (entry) {
+      const entryTs = new Date(entry.at).getTime();
+      // FIX BUG-B17 — Protection contre clock skew : si timestamp est dans le futur
+      // (>15 min de tolérance), on le considère corrompu et on autorise l'action.
+      // Sans ce garde, une horloge décalée en avance bloque indéfiniment l'action.
+      const SKEW_TOLERANCE = 15 * 60 * 1000;
+      if (entryTs > now + SKEW_TOLERANCE) {
+        // Timestamp anormal → invalider l'entrée
+        delete data[fingerprint];
+        gcAntiRedondance._save(data);
+        return { allowed: true };
+      }
+      if (entryTs > cutoff) {
+        return { allowed: false, existing: entry };
+      }
     }
     return { allowed: true };
   },

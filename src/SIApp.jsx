@@ -470,6 +470,10 @@ export function SIApp(props) {
   useEffect(() => { localUserRef.current = localUser; }, [localUser]);
   const usersRef = useRef(users);
   useEffect(() => { usersRef.current = users; }, [users]);
+  // FIX BUG-B12 — Ref pour isDemoMode aussi (sinon le timer 17h30 ne voit pas
+  // les changements de mode démo et déconnecte même en démo).
+  const isDemoModeRef = useRef(isDemoMode);
+  useEffect(() => { isDemoModeRef.current = isDemoMode; }, [isDemoMode]);
   // FIX v134 — isLevel5Plus via ref pour éviter la stale closure dans le timer 17h30
   const isLevel5PlusRef = useRef((localUser?.level ?? 0) >= 5 || !!localUser?.isAdmin);
   useEffect(() => { isLevel5PlusRef.current = (localUser?.level ?? 0) >= 5 || !!localUser?.isAdmin; }, [localUser?.level, localUser?.isAdmin]);
@@ -507,7 +511,7 @@ export function SIApp(props) {
     const timer = setInterval(() => {
       const n = new Date();
       const nh = n.getHours(), nm = n.getMinutes(), ns = n.getSeconds();
-      if (!isDemoMode && !isLevel5PlusRef.current) {
+      if (!isDemoModeRef.current && !isLevel5PlusRef.current) {
         if (nh === 17 && nm === 30 && ns < 31) {
           addSessionLog && addSessionLog("DECONNEXION", localUserRef.current, { status:"AUTO", reason:"Déconnexion automatique — 17h30 (fin de journée)" }); // FIX v135 — localUserRef.current (anti-stale-closure)
           setNotifications(prev => [{id:"N"+Date.now(),icon:"🔒",message:`Session fermée automatiquement — 17h30 atteint. Bonne soirée, ${(localUserRef.current?.name||"").split(" ")[0]} !`,at:new Date().toISOString(),read:false},...prev]);

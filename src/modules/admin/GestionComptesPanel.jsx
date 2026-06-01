@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // GestionComptesPanel.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, _noop, _tDone, _tActive, formatDate, generateAccessCode, gcFileSave, _activeUser, gcViewDoc, formatDateTime, getProcColor, _gcCachedIp, _GC_MEM, gcDownloadDoc, playSound, gcHashPassword, dsSave, gcNormalizeUser, gcNormalizeUserProcess } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, _noop, _tDone, _tActive, formatDate, generateAccessCode, gcFileSave, _activeUser, gcViewDoc, formatDateTime, getProcColor, _gcCachedIp, _GC_MEM, gcDownloadDoc, playSound, gcHashPassword, dsSave, dsSaveUsersWithPrune, gcNormalizeUser, gcNormalizeUserProcess } from '../../core/index.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { STATUS_CONFIG, USER_FUNCTIONS, SUSPENSION_CAUSES, ACCOUNT_STATUS_CONFIG, CODES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, ProgressBar} from '../../components/UI.jsx';
@@ -1373,7 +1373,7 @@ ${targetUser.name} sera réactivé(e) seulement après approbation DG.`);
   const handleDeleteUser = (targetUser) => {
     if (!isAdmin) { gcAlert("Seule la Direction peut supprimer définitivement un compte."); return; }
     if (targetUser.id === "USR-ADM-000") { gcAlert("Le compte administrateur principal ne peut pas être supprimé."); return; }
-    setUsers(prev => {const updated=prev.filter(u => u.id !== targetUser.id);dsSave('users',updated);return updated;});
+    setUsers(prev => {const updated=prev.filter(u => u.id !== targetUser.id);dsSaveUsersWithPrune(updated, localUser.id).catch(()=>{});return updated;});
     notify("🗑️", `[COMPTE SUPPRIMÉ] ${targetUser.name} (${targetUser.id}) supprimé définitivement par ${localUser.name}`, "gestion_comptes");
     if (setSessionLogs) setSessionLogs(prev => [{
       id:"SES-"+Date.now(), type:"SUPPRESSION", userId:targetUser.id, userName:targetUser.name,
