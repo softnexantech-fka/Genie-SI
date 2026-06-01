@@ -326,6 +326,42 @@ export default function App() {
             }], fallback: {} },
         ];
 
+        // FIX BUG-B1 — Hydrater 'users' EN PREMIER et explicitement, en synchrone bloquant.
+        // Sans cela, les comptes utilisateurs créés sur d'autres machines n'apparaissent
+        // pas sur les machines edge (LS vide) qui affichent INITIAL_USERS.
+        // On essaye dans l'ordre : 'users' → 'gc-users' (auth). Si l'un répond, on l'utilise.
+        try {
+          let usersFromServer = await dsGet('users', null);
+          if (!Array.isArray(usersFromServer) || usersFromServer.length === 0) {
+            const gcUsersFromServer = await dsGet('gc-users', null);
+            if (Array.isArray(gcUsersFromServer) && gcUsersFromServer.length > 0) {
+              usersFromServer = gcUsersFromServer.map(u => ({
+                id:            u.id,
+                alias:         u.username || u.alias || u.id,
+                name:          u.name || u.username || u.alias || u.id,
+                email:         u.email || '',
+                role:          u.role || 'Collaborateur',
+                level:         u.level ?? 1,
+                accountStatus: u.accountStatus || 'ACTIF',
+                passwordHash:  u.passwordHash || u.password || '',
+                isAdmin:       u.isAdmin || false,
+                isMG:          u.isMG || false,
+                process:       u.process || '',
+                processes:     u.processes || [],
+              }));
+              console.log(`[SI] ⬇️  Users reconstruits depuis gc-users (${usersFromServer.length} comptes)`);
+            }
+          }
+          if (Array.isArray(usersFromServer) && usersFromServer.length > 0) {
+            lsSave('users', usersFromServer);
+            setUsersState(usersFromServer);
+            setProdUsers(usersFromServer);
+            console.log(`[SI] ⬇️  PRIORITY hydraté users : ${usersFromServer.length} comptes du serveur`);
+          }
+        } catch (e) {
+          console.warn('[SI] Hydratation prioritaire users échouée:', e.message);
+        }
+
         // FIX v155 — Hydration timeout: prevent page blocking on slow network
         // If hydration takes > 15s, unblock the page anyway. Hydration continues in background.
         const hydrationPromise = Promise.all(HYDRATE_MAP.map(async ({ key, setters, fallback }) => {
@@ -812,21 +848,17 @@ export default function App() {
         let needsRehash = missingCreds.length > 0;
         const rehashSet = new Set(missingCreds.map(u => u.id)); // seuls ces comptes seront re-hachés
 
-        for (const u of defaultUsers) {
-          const currentHash = await gcHashPassword(defaultPwds[u.id]);
-          if (u.passwordHash === currentHash) continue; // Correct → rien à faire
-          // Hash différent → vérifier si c'est un hash PAR DÉFAUT connu (SHA-256 ou fallback)
-          // Si NON → mot de passe personnalisé → NE PAS toucher
-          const fallback = _fallbackHash(defaultPwds[u.id]);
-          const sha256   = await _sha256Hash(defaultPwds[u.id]);
-          const isDefaultHash = u.passwordHash === fallback || (sha256 !== null && u.passwordHash === sha256);
-          if (isDefaultHash) {
-            // Contexte crypto changé ET hash est bien le hash par défaut → re-hacher
-            needsRehash = true;
-            rehashSet.add(u.id);
-          }
-          // Sinon : mot de passe personnalisé → gcVerifyPassword cross-context gère déjà cela
-        }
+        // FIX BUG-B2 — Boucle de re-hashage des hash "par défaut" DÉSACTIVÉE.
+        // Pourquoi : la détection isDefaultHash basée sur _fallbackHash / _sha256Hash peut
+        // produire des faux positifs (collisions de hash, contextes crypto multiples),
+        // ce qui réinitialise des mots de passe personnalisés et les propage au serveur.
+        // gcVerifyPassword (helpers.js) gère déjà la vérification cross-context sans avoir
+        // besoin de re-hacher au démarrage. On garde uniquement le cas "missingCreds"
+        // (compte par défaut sans aucun credential → restauration nécessaire).
+        //
+        // Les variables _fallbackHash et _sha256Hash ci-dessus sont conservées car
+        // potentiellement utilisées ailleurs par gcVerifyPassword.
+        void _fallbackHash; void _sha256Hash; void defaultUsers;
 
         if (!needsRehash) return;
 

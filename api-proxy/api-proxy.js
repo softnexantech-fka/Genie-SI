@@ -1371,7 +1371,17 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
         } catch (_) {}
         const preserved = existing.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
         if (preserved.length > 0) {
-          finalValue = [...sanitized, ...preserved];
+          // FIX BUG-B5 — Déduplication par ID après merge pour éviter les doublons
+          // (un même id peut apparaître dans sanitized par erreur).
+          const merged = [...sanitized, ...preserved];
+          const seenIds = new Set();
+          finalValue = merged.filter(item => {
+            const id = item?.id ? String(item.id) : null;
+            if (!id) return true;
+            if (seenIds.has(id)) return false;
+            seenIds.add(id);
+            return true;
+          });
           console.warn(
             `[ANTI-REGRESSION v140+] Merge défensif pour '${key}': ` +
             `entrant=${sanitized.length}, serveur=${existing.length}, ` +

@@ -860,7 +860,16 @@ export async function dsSave(key, value, userId = null, options = {}) {
       const tombstonedIds = new Set(_tombstones[key] || []);
       const preserved = cachedData.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
       if (preserved.length > 0) {
-        sendValue = [...value, ...preserved];
+        // FIX BUG-B5 — Déduplication par ID après merge pour éviter les doublons
+        const merged = [...value, ...preserved];
+        const seenIds = new Set();
+        sendValue = merged.filter(item => {
+          const id = item?.id ? String(item.id) : null;
+          if (!id) return true;
+          if (seenIds.has(id)) return false;
+          seenIds.add(id);
+          return true;
+        });
         console.warn(
           `[dsSave ANTI-REGRESSION v140+] Merge défensif client pour '${key}': ` +
           `local=${value.length}, cache=${cachedData.length}, envoi=${sendValue.length} (${preserved.length} préservés, ${tombstonedIds.size} tombstonés exclus)`

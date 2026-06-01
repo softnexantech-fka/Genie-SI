@@ -405,6 +405,21 @@ export function SIApp(props) {
 
   const [localUser, setLocalUser] = useState(currentUser);
   useEffect(() => { if (currentUser) setLocalUser(currentUser); }, [currentUser]);
+
+  // FIX BUG-B4 — Protection contre crash si localUser est null pendant transition.
+  // Sans ce garde, localUser.isMG / localUser.id à différents endroits (lignes 473, 551, 649…)
+  // lèvent TypeError "Cannot read properties of null" et crash le shell entier.
+  if (!localUser) {
+    return (
+      <div style={{
+        background: '#060F1E', minHeight: '100vh', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', color: '#C9A84C',
+        fontFamily: 'system-ui', fontSize: 13,
+      }}>
+        Chargement de la session…
+      </div>
+    );
+  }
   const [lateAccessModal, setLateAccessModal] = useState(false);
   const headerRef = useRef(null);
 
