@@ -49,6 +49,11 @@ function getProxyUrl() {
   return PROXY_URL;
 }
 
+// Construire une URL absolue vers le backend pour les fichiers
+function fileApiUrl(path) {
+  return `${getProxyUrl()}${path}`;
+}
+
 async function checkProxyUrl(url) {
   try {
     const controller = new AbortController();
@@ -130,8 +135,6 @@ async function serverAvailable() {
 
 async function uploadToServer(file, meta) {
   // FIX v154 CRITICAL — Rejeter les fichiers vides AVANT l'envoi.
-  // Un File/Blob à 0 octet est sauvegardé côté serveur avec 0 Ko
-  // (multer crée le fichier sur disque mais ne reçoit rien).
   if (!file || file.size === 0) {
     console.error('[uploadToServer] ❌ Fichier vide (0 octet) — upload annulé :', file?.name);
     return null;
@@ -142,7 +145,8 @@ async function uploadToServer(file, meta) {
   if (meta.module)      form.append('module',       meta.module);
   if (meta.uploadedBy)  form.append('uploadedBy',   meta.uploadedBy);
   try {
-    const r = await fetch('/api/files/upload', {
+    // FIX CRITICAL — URL absolue vers le backend (port 3001), pas relative au frontend
+    const r = await fetch(fileApiUrl('/api/files/upload'), {
       method: 'POST',
       headers: _authHeaders(),
       body: form,
@@ -204,20 +208,16 @@ export async function gcFileSave(file, meta = {}) {
   const id = meta.id || `F-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // FIX v154 CRITICAL — S'assurer qu'on a un vrai File avec un vrai contenu.
-  // new Blob([file]) sur un objet non-binaire donne un Blob vide → 0 Ko côté serveur.
-  // On accepte uniquement File ou Blob natifs du navigateur.
   let blob;
   if (file instanceof File) {
     blob = file;
   } else if (file instanceof Blob) {
     blob = file;
   } else {
-    // Dernier recours : on tente de wrapper, mais on log pour tracer le cas
     console.warn('[gcFileSave] Type de fichier inattendu :', typeof file, '— wrapping en Blob');
     blob = new Blob([file]);
   }
 
-  // Vérification taille : on n'upload jamais un fichier de 0 octet
   const realSize = blob.size ?? 0;
   if (realSize === 0) {
     console.error('[gcFileSave] ❌ Fichier vide (0 octet) — opération annulée :', meta.nom || file.name);
@@ -238,17 +238,12 @@ export async function gcFileSave(file, meta = {}) {
     serverId:       null,
   };
 
-  // FIX v154 — Construire un vrai File nommé pour multer côté serveur.
-  // Si c'est déjà un File, on le garde tel quel (son nom original est correct).
-  // Sinon on crée un File depuis le Blob pour que multer reçoive le bon nom.
   const fileToUpload = (file instanceof File)
     ? file
     : new File([blob], ref.nom, { type: ref.type });
 
-  // Double-vérification avant envoi réseau
   if (fileToUpload.size === 0) {
     console.error('[gcFileSave] ❌ fileToUpload vide après conversion — fallback IDB :', ref.nom);
-    // Fallback IDB uniquement
     ref.blob = blob;
     ref.storageType = 'local';
     try { ref.dataUrl = URL.createObjectURL(blob); ref.url = ref.dataUrl; } catch (_) {}
@@ -266,7 +261,10 @@ export async function gcFileSave(file, meta = {}) {
   if (serverRef && serverRef.id) {
     ref.synced      = true;
     ref.serverId    = serverRef.id;
-    ref.serverUrl   = serverRef.serverUrl || `/api/files/${serverRef.id}`;
+    // FIX CRITICAL — URL absolue stockée dans la référence
+    ref.serverUrl   = serverRef.serverUrl
+      ? (serverRef.serverUrl.startsWith('http') ? serverRef.serverUrl : fileApiUrl(serverRef.serverUrl))
+      : fileApiUrl(`/api/files/${serverRef.id}`);
     ref.path        = ref.serverUrl;
     ref.url         = ref.serverUrl;
     ref.storageType = 'server';
@@ -297,17 +295,27 @@ export async function gcFileSave(file, meta = {}) {
 }
 
 // FIX BUG-FILE-1 — Détecter si un fileRef est côté serveur même sans serverId/serverUrl explicite.
-// Les anciens refs (uploadés avant l'ajout des champs serverId/serverUrl) utilisaient
-// uniquement 'url' ou 'storageType: server'. Cette fonction unifie la détection.
+// Retourne TOUJOURS une URL absolue vers le backend.
 function _resolveServerUrl(fileRef) {
   if (!fileRef) return null;
-  if (fileRef.serverUrl) return fileRef.serverUrl;
-  if (fileRef.serverId)  return `/api/files/${fileRef.serverId}`;
+  // URL absolue déjà stockée → utiliser directement
+  if (fileRef.serverUrl) {
+    return fileRef.serverUrl.startsWith('http')
+      ? fileRef.serverUrl
+      : fileApiUrl(fileRef.serverUrl);
+  }
+  if (fileRef.serverId) return fileApiUrl(`/api/files/${fileRef.serverId}`);
   // Compatibilité ascendante : anciens refs avec url direct ou storageType server
-  if (fileRef.storageType === 'server' && fileRef.url) return fileRef.url;
-  if (fileRef.url && typeof fileRef.url === 'string' && fileRef.url.startsWith('/api/files/')) return fileRef.url;
-  // Dernier recours : si l'id ressemble à un id serveur (F-xxxxx) et pas de blob connu
-  if (fileRef.id && /^F-\d+-/.test(fileRef.id) && !fileRef.blob) return `/api/files/${fileRef.id}`;
+  if (fileRef.storageType === 'server' && fileRef.url) {
+    return fileRef.url.startsWith('http') ? fileRef.url : fileApiUrl(fileRef.url);
+  }
+  if (fileRef.url && typeof fileRef.url === 'string' && fileRef.url.includes('/api/files/')) {
+    return fileRef.url.startsWith('http') ? fileRef.url : fileApiUrl(fileRef.url);
+  }
+  // Dernier recours : id de type F-xxxxx sans blob connu
+  if (fileRef.id && /^F-\d+-/.test(fileRef.id) && !fileRef.blob) {
+    return fileApiUrl(`/api/files/${fileRef.id}`);
+  }
   return null;
 }
 
@@ -317,20 +325,17 @@ function _resolveServerUrl(fileRef) {
 export async function gcFileLoad(fileRef) {
   if (!fileRef?.id) return null;
 
-  // FIX BUG-FILE-1 — Utiliser la détection unifiée (couvre anciens et nouveaux refs)
   const serverUrl = _resolveServerUrl(fileRef);
   if (serverUrl) {
     return { ...fileRef, url: serverUrl, local: false };
   }
 
-  // Sinon depuis IDB (fichier stocké localement offline)
   const cached = await idbGet(fileRef.id);
   if (cached?.blob) {
     const url = URL.createObjectURL(cached.blob);
     return { ...cached, url, local: true };
   }
 
-  // Fallback dataUrl (documents stockés en base64 dans localStorage/serveur)
   if (fileRef.dataUrl && typeof fileRef.dataUrl === 'string' && fileRef.dataUrl.startsWith('data:')) {
     return { ...fileRef, url: fileRef.dataUrl, local: true };
   }
@@ -344,15 +349,13 @@ export async function gcFileLoad(fileRef) {
 export async function gcFileUrl(fileRef) {
   if (!fileRef?.id) return { url: null, isObjectUrl: false };
 
-  // FIX BUG-FILE-1 — Détection unifiée server/legacy
-  // FIX BUG-FILE-2 — Ajouter ?view=1 pour les consultations (Content-Disposition: inline côté serveur)
+  // FIX BUG-FILE-2 — URL absolue + ?view=1 pour Content-Disposition: inline
   const serverUrl = _resolveServerUrl(fileRef);
   if (serverUrl) {
     const viewUrl = serverUrl.includes('?') ? `${serverUrl}&view=1` : `${serverUrl}?view=1`;
     return { url: viewUrl, isObjectUrl: false };
   }
 
-  // Sinon depuis IDB
   const cached = await idbGet(fileRef.id);
   if (cached?.blob) {
     const url = URL.createObjectURL(cached.blob);
@@ -364,7 +367,6 @@ export async function gcFileUrl(fileRef) {
 
 /**
  * Télécharger un fichier (déclenche le téléchargement navigateur)
- * Retourne { ok, error } pour que l'appelant puisse afficher un message.
  */
 export async function gcFileDownload(fileRef) {
   const loaded = await gcFileLoad(fileRef);
@@ -392,7 +394,8 @@ export async function gcFileDelete(fileRef) {
   if (online && (fileRef.serverId || fileRef.serverUrl)) {
     const id = fileRef.serverId || fileRef.id;
     try {
-      await fetch(`/api/files/${id}`, {
+      // FIX CRITICAL — URL absolue pour la suppression
+      await fetch(fileApiUrl(`/api/files/${id}`), {
         method: 'DELETE',
         headers: _authHeaders(),
         signal: AbortSignal.timeout(8000),
@@ -411,7 +414,8 @@ export async function gcFileListByDossier(dossierId) {
   const online = await serverAvailable();
   if (online) {
     try {
-      const r = await fetch(`/api/files?dossierId=${encodeURIComponent(dossierId)}`, {
+      // FIX CRITICAL — URL absolue pour la liste
+      const r = await fetch(fileApiUrl(`/api/files?dossierId=${encodeURIComponent(dossierId)}`), {
         headers: _authHeaders(),
         signal: AbortSignal.timeout(8000),
       });
@@ -427,7 +431,7 @@ export async function gcFileListByDossier(dossierId) {
           uploadedBy: f.uploaded_by,
           uploadedAt: f.uploaded_at ? new Date(f.uploaded_at * 1000).toISOString() : null,
           serverId:   f.id,
-          serverUrl:  `/api/files/${f.id}`,
+          serverUrl:  fileApiUrl(`/api/files/${f.id}`),
           synced:     true,
         }));
       }
@@ -446,7 +450,8 @@ export async function gcFileListByModule(module) {
   const online = await serverAvailable();
   if (online) {
     try {
-      const r = await fetch(`/api/files?module=${encodeURIComponent(module)}`, {
+      // FIX CRITICAL — URL absolue pour la liste
+      const r = await fetch(fileApiUrl(`/api/files?module=${encodeURIComponent(module)}`), {
         headers: _authHeaders(),
         signal: AbortSignal.timeout(8000),
       });
@@ -455,7 +460,7 @@ export async function gcFileListByModule(module) {
         return (data.files || []).map(f => ({
           id: f.id, nom: f.original_name, type: f.mime_type,
           taille: f.size_bytes, module: f.module,
-          serverId: f.id, serverUrl: `/api/files/${f.id}`, synced: true,
+          serverId: f.id, serverUrl: fileApiUrl(`/api/files/${f.id}`), synced: true,
         }));
       }
     } catch {}
@@ -466,7 +471,6 @@ export async function gcFileListByModule(module) {
 
 /**
  * Synchroniser les fichiers IDB non synchros vers le serveur
- * Appeler au démarrage et lors du retour en ligne
  */
 export async function gcSyncFilesToServer() {
   const unsynced = await idbGetUnsynced();
@@ -484,8 +488,12 @@ export async function gcSyncFilesToServer() {
       module:      ref.module,
       uploadedBy:  ref.uploadedBy,
     });
-    if (serverRef) {
-      const updated = { ...ref, blob: null, synced: true, serverId: serverRef.id, serverUrl: `/api/files/${serverRef.id}` };
+    if (serverRef && serverRef.id) {
+      const updated = {
+        ...ref, blob: null, synced: true,
+        serverId:  serverRef.id,
+        serverUrl: fileApiUrl(`/api/files/${serverRef.id}`),
+      };
       await idbSave(updated);
       count++;
     }
@@ -496,16 +504,10 @@ export async function gcSyncFilesToServer() {
 
 /**
  * Migration des anciens fichiers LS/IDB vers serveur
- * Appeler une fois au démarrage
  */
 export async function gcMigrateFilesFromLS() {
-  // Les anciens fichiers encodés en base64 dans localStorage
-  const LS_FILE_KEYS = [
-    'gc-dossier-files', 'gc-standalone-docs', 'gc-docs-archives',
-  ];
   const online = await serverAvailable();
   if (!online) return { migrated: 0, skipped: 0 };
-  // Sync IDB non-synchros d'abord
   await gcSyncFilesToServer();
   return { migrated: 0, skipped: 0 };
 }
@@ -514,9 +516,8 @@ export async function gcMigrateFilesFromLS() {
  * Statistiques stockage fichiers
  */
 export async function gcFileStats() {
-  // localStorage usage
   let lsUsed = 0;
-  let lsLimit = 5 * 1024 * 1024; // 5MB approx
+  let lsLimit = 5 * 1024 * 1024;
   try {
     for (let key in localStorage) {
       if (Object.prototype.hasOwnProperty.call(localStorage, key)) {
@@ -528,7 +529,6 @@ export async function gcFileStats() {
   const lsLimitMB = (lsLimit / (1024 * 1024)).toFixed(1);
   const lsPercent = Math.round((lsUsed / lsLimit) * 100);
 
-  // IDB stats
   let idbCount = 0;
   let idbTotalSize = 0;
   try {
@@ -550,33 +550,22 @@ export async function gcFileStats() {
   } catch (_) {}
 
   const idbTotalSizeMB = (idbTotalSize / (1024 * 1024)).toFixed(1);
-
-  // Proxy status
   const proxy = await serverAvailable();
 
   return {
-    localStorage: {
-      usedMB: parseFloat(lsUsedMB),
-      limitMB: parseFloat(lsLimitMB),
-      percentUsed: lsPercent
-    },
-    idb: {
-      count: idbCount,
-      totalSizeMB: parseFloat(idbTotalSizeMB)
-    },
+    localStorage: { usedMB: parseFloat(lsUsedMB), limitMB: parseFloat(lsLimitMB), percentUsed: lsPercent },
+    idb: { count: idbCount, totalSizeMB: parseFloat(idbTotalSizeMB) },
     proxy
   };
 }
 
 /**
  * Vérifier si le proxy API est disponible
- * FIX BUG-FILE-3 — Le backend expose /health (pas /api/health).
- * L'ancien endpoint renvoyait 404 → le composant affichait toujours "💾 Stockage local"
- * même quand le serveur était disponible, créant une confusion sur l'état réel.
+ * FIX CRITICAL — URL absolue vers le backend, pas relative au frontend
  */
 export async function gcProxyStatus() {
   try {
-    const response = await fetch('/health', { method: 'GET', signal: AbortSignal.timeout(3000) });
+    const response = await fetch(fileApiUrl('/health'), { method: 'GET', signal: AbortSignal.timeout(3000) });
     return response.ok;
   } catch (_) {
     return false;
