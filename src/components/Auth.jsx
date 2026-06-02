@@ -871,9 +871,14 @@ export function LoginPage(props) {
     };
 
     const expectedPwdOrHash = user.passwordHash || user.password;
+    // Détection hash bcrypt ($2b$ ou $2a$) : le client ne peut pas vérifier bcrypt,
+    // toujours passer par le serveur. Cela couvre les comptes ayant changé leur mdp
+    // via l'ancien code qui écrivait bcrypt dans 'users'.
+    const _isBcryptHash = (h) => typeof h === 'string' && (h.startsWith('$2b$') || h.startsWith('$2a$'));
+
     if (isAdminMode) {
-      if (!expectedPwdOrHash) {
-        // Hash absent → vérification serveur obligatoire
+      if (!expectedPwdOrHash || _isBcryptHash(expectedPwdOrHash)) {
+        // Hash absent ou bcrypt → vérification serveur obligatoire
         _verifyViaServer(user);
         return;
       }
@@ -887,8 +892,8 @@ export function LoginPage(props) {
       });
       return;
     } else {
-      if (!expectedPwdOrHash) {
-        // Hash absent → vérification serveur obligatoire
+      if (!expectedPwdOrHash || _isBcryptHash(expectedPwdOrHash)) {
+        // Hash absent ou bcrypt → vérification serveur obligatoire
         _verifyViaServer(user);
         return;
       }

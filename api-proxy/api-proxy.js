@@ -1217,12 +1217,15 @@ app.post('/api/auth/change-password', [
     const newHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
     user.passwordHash = newHash;
     await dbSet('gc-users', gcUsers);
-    // [FIX-AUTH-2] Propager le nouveau hash dans 'users' aussi (cohérence cross-clés)
+    // Propager dans 'users' avec le hash SHA-256 (pas bcrypt) pour que les clients
+    // puissent toujours vérifier localement sans appel serveur.
+    // gc-users conserve bcrypt (plus sécurisé côté serveur), users conserve SHA-256 (vérifiable client).
     try {
+      const sha256Hash = crypto.createHash('sha256').update(newPassword + GC_SHA256_SALT).digest('hex');
       const allUsers = await dbGet('users') || [];
       if (Array.isArray(allUsers)) {
         const pu = allUsers.find(u => u.id === user.id || u.alias === user.username);
-        if (pu) { pu.passwordHash = newHash; await dbSet('users', allUsers); }
+        if (pu) { pu.passwordHash = sha256Hash; await dbSet('users', allUsers); }
       }
     } catch (_) {}
     await auditLog(req.user.id, 'CHANGE_PASSWORD', 'gc-users', 'Mot de passe modifié', req.ip);
@@ -2255,15 +2258,18 @@ async function start() {
     let gcUsers  = await dbGet('gc-users') || [];
 
     // [FIX-INIT-BOOT] If both tables are empty, initialize with default users
-    // This prevents the database from starting completely empty and causing
-    // localStorage isolation issues when clients access from different IPs
     if ((!Array.isArray(allUsers) || allUsers.length === 0) && (!Array.isArray(gcUsers) || gcUsers.length === 0)) {
-      allUsers = DEFAULT_INITIAL_USERS;
-      gcUsers = DEFAULT_INITIAL_USERS.map(u => ({
+      // Générer les hashes SHA-256 des mots de passe par défaut (6 derniers chars de l'ID)
+      const _sha256 = (s) => crypto.createHash('sha256').update(s + GC_SHA256_SALT).digest('hex');
+      allUsers = DEFAULT_INITIAL_USERS.map(u => ({
+        ...u,
+        passwordHash: _sha256(u.id.slice(-6)),
+      }));
+      gcUsers = allUsers.map(u => ({
         id: u.id,
         username: u.alias || u.id,
         email: u.email || '',
-        passwordHash: '',
+        passwordHash: u.passwordHash,
         role: u.role || 'Collaborateur',
         level: u.level ?? 1,
         accountStatus: u.accountStatus || 'ACTIF',
@@ -2272,7 +2278,7 @@ async function start() {
       }));
       await dbSet('users', allUsers);
       await dbSet('gc-users', gcUsers);
-      console.log(`[BOOT-INIT] ✅ Tables utilisateurs initialisées avec ${allUsers.length} comptes par défaut`);
+      console.log(`[BOOT-INIT] ✅ Tables utilisateurs initialisées avec ${allUsers.length} comptes par défaut (hashes SHA-256 générés)`);
     }
 
     // [FIX-BOOT-RECOVER] Si 'users' est perdu mais 'gc-users' existe, reconstruire
@@ -2286,7 +2292,7 @@ async function start() {
         role:          u.role || 'Collaborateur',
         level:         u.level ?? 1,
         accountStatus: u.accountStatus || 'ACTIF',
-        passwordHash:  u.passwordHash || u.password || '',
+        passwordHash:  (u.passwordHash && !u.passwordHash.startsWith('$2') ? u.passwordHash : ''),
         isAdmin:       u.isAdmin || false,
         isMG:          u.isMG || false,
         process:       u.process || '',
@@ -2301,12 +2307,22 @@ async function start() {
     let added = 0, updated = 0;
     for (const u of allUsers) {
       if (!u.id) continue;
+      const idx = synced.findIndex(g => g.id === u.id);
+      // Ne jamais écraser un hash bcrypt (gc-users) avec un hash inférieur ou vide (users).
+      // Priorité : bcrypt > SHA-256 > vide.
+      let hashToUse = u.passwordHash || '';
+      if (idx !== -1) {
+        const existingHash = synced[idx].passwordHash || '';
+        const existingIsBcrypt = existingHash.startsWith('$2b$') || existingHash.startsWith('$2a$');
+        const incomingIsBcrypt = hashToUse.startsWith('$2b$') || hashToUse.startsWith('$2a$');
+        if (existingIsBcrypt && !incomingIsBcrypt) hashToUse = existingHash; // préserver bcrypt
+        if (existingHash && !hashToUse) hashToUse = existingHash; // préserver tout hash vs vide
+      }
       const entry = {
         id: u.id, username: u.alias || u.id, email: u.email || '',
-        passwordHash: u.passwordHash || '', role: u.role || 'Collaborateur',
+        passwordHash: hashToUse, role: u.role || 'Collaborateur',
         level: u.level ?? 1, accountStatus: u.accountStatus || 'ACTIF',
       };
-      const idx = synced.findIndex(g => g.id === u.id);
       if (idx === -1) { synced.push(entry); added++; }
       else { synced[idx] = { ...synced[idx], ...entry }; updated++; }
     }

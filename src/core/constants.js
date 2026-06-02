@@ -478,19 +478,19 @@ const _gcSHA256Hash = async (password) => {
 
 export const gcVerifyPassword = async (inputPassword, storedHashOrPlain) => {
   if (!inputPassword || !storedHashOrPlain) return false;
-  // Si le storedHash est un hash 64 hex → vérification cryptographique
+  // Hash bcrypt ($2b$ / $2a$) : le navigateur ne peut pas vérifier bcrypt.
+  // Retourner false pour que l'appelant parte en vérification serveur.
+  if (storedHashOrPlain.startsWith('$2b$') || storedHashOrPlain.startsWith('$2a$')) return false;
+  // Hash SHA-256 (64 hex) → vérification cryptographique
   if (/^[0-9a-f]{64}$/i.test(storedHashOrPlain)) {
-    // 1. SHA-256 (via crypto.subtle ou pur-JS, TOUJOURS disponible depuis v133)
     const inputHash = await gcHashPassword(inputPassword);
     if (inputHash === storedHashOrPlain) return true;
-    // 2. Rétrocompat v133 — anciens hashes stockés avec le fallback FNV-like custom
-    //    (comptes créés AVANT v133 depuis un contexte HTTP non-localhost).
-    //    Une fois le mot de passe changé depuis v133, ce chemin ne sera plus emprunté.
+    // Rétrocompat : anciens hashes FNV-like créés avant v133 sur contexte HTTP non-localhost
     const legacy = _gcFallbackHash(inputPassword);
     if (storedHashOrPlain === legacy) return true;
     return false;
   }
-  // Sinon comparaison directe (rétrocompat comptes existants sans hash)
+  // Texte brut (rétrocompat comptes legacy sans hash)
   return inputPassword === storedHashOrPlain;
 };
 
