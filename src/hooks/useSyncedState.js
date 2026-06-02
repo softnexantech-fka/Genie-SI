@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { dsSave, dsOnSync, dsGet, dsDeleteItemFromArray } from '../core/datastore.js';
-import { lsLoad, lsSave } from '../core/storage.js';
+import { lsLoad, lsSave, _lsGet } from '../core/storage.js';
 
 /**
  * Hook React pour données synchronisées temps réel.
@@ -43,6 +43,12 @@ export function useSyncedState(key, fallback = null) {
     const unsub = dsOnSync((event) => {
       if (event.key !== key) return;
       if (!mountedRef.current) return;
+      // Ne pas écraser si notre écriture locale est plus récente que ce broadcast
+      try {
+        const localWriteTs = parseInt(_lsGet('__ts__:' + key) || '0');
+        const broadcastTs  = event.updatedAt || event.ts || 0;
+        if (localWriteTs > broadcastTs) return; // local plus récent — ignorer
+      } catch {}
       dsGet(key, fallback).then(val => {
         if (!mountedRef.current) return;
         if (val !== null && val !== undefined) {

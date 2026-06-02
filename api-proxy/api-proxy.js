@@ -590,9 +590,9 @@ async function dbGet(key) {
   try {
     let row;
     if (dbMode === 'sqlite3') {
-      row = await getAsync('SELECT value FROM si_data WHERE key = ?', [key]);
+      row = await getAsync('SELECT value, updated_at FROM si_data WHERE key = ?', [key]);
     } else {
-      row = db.prepare('SELECT value FROM si_data WHERE key = ?').get(key);
+      row = db.prepare('SELECT value, updated_at FROM si_data WHERE key = ?').get(key);
     }
     if (!row) return null; // clé absente → null propre
     // FIX BUG-B15 — Distinguer "non trouvé" (null) de "données corrompues" (throw).
@@ -645,6 +645,23 @@ async function dbDelete(key) {
     else db.prepare('DELETE FROM si_data WHERE key = ?').run(key);
     return true;
   } catch(e) { return false; }
+}
+
+// Comme dbGet mais retourne aussi updated_at (Unix secondes → ms) pour le client
+async function dbGetWithMeta(key) {
+  if (!dbReady) return null;
+  try {
+    let row;
+    if (dbMode === 'sqlite3') {
+      row = await getAsync('SELECT value, updated_at FROM si_data WHERE key = ?', [key]);
+    } else {
+      row = db.prepare('SELECT value, updated_at FROM si_data WHERE key = ?').get(key);
+    }
+    if (!row) return null;
+    try {
+      return { value: JSON.parse(row.value), updatedAt: (row.updated_at || 0) * 1000 };
+    } catch { return null; }
+  } catch(e) { return null; }
 }
 
 async function dbGetAll() {
@@ -1390,16 +1407,16 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
     }
 
     if (dbReady) {
-      let value;
+      let meta;
       try {
-        value = await dbGet(key);
+        meta = await dbGetWithMeta(key);
       } catch (corruptErr) {
-        // FIX BUG-B15 — Corruption détectée → 500 explicite (client gère et alerte)
         return res.status(500).json({ ok: false, error: 'Données corrompues sur le serveur', key, corrupt: true });
       }
-      if (value === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
+      if (meta === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
+      const { value, updatedAt } = meta;
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
-      return res.json({ ok: true, key, value });
+      return res.json({ ok: true, key, value, updatedAt });
     }
 
     const data = jsonLoad();
@@ -1574,8 +1591,9 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
 
   // [C8] Exclure l'expéditeur du broadcast via X-Socket-Id header
   const senderSocketId = req.headers['x-socket-id'] || null;
-  broadcast('data_changed', { key, action: 'set', by: req.user?.id || 'anonymous', ts: Date.now() }, senderSocketId);
-  res.json({ ok: true, key, saved: true });
+  const writeTs = Date.now();
+  broadcast('data_changed', { key, action: 'set', by: req.user?.id || 'anonymous', ts: writeTs, updatedAt: writeTs }, senderSocketId);
+  res.json({ ok: true, key, saved: true, updatedAt: writeTs });
 });
 
 // GET history for a key (audit entries)

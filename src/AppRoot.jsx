@@ -570,13 +570,32 @@ export default function App() {
             const serverVal = await dsGet(key, null);
 
             if (serverVal !== null) {
-              // ══ CAS A : clé présente sur le serveur — l'utiliser telle quelle ══
-              // Même si serverVal = [], c'est peut-être intentionnel (tout supprimé).
-              // On ne pousse RIEN au serveur.
-              lsSave(key, serverVal);
-              setters.forEach(fn => fn(serverVal));
-              const n = Array.isArray(serverVal) ? `${serverVal.length} entrées` : 'objet';
-              console.log(`[SI] ⬇️  Hydraté depuis serveur : ${key} (${n})`);
+              // ══ CAS A : clé présente sur le serveur ══
+              // Comparaison timestamps : n'écraser le local QUE si le serveur est au moins aussi récent.
+              // __ts__:key = dernière écriture locale (dsSave)
+              // __svts__:key = dernier updated_at connu du serveur (dsGet)
+              const localWriteTs  = parseInt(_lsGet('__ts__:' + key) || '0');
+              const serverKnownTs = parseInt(_lsGet('__svts__:' + key) || '0');
+              const serverIsNewer = localWriteTs === 0 || serverKnownTs >= localWriteTs;
+
+              if (serverIsNewer) {
+                lsSave(key, serverVal);
+                setters.forEach(fn => fn(serverVal));
+                const n = Array.isArray(serverVal) ? `${serverVal.length} entrées` : 'objet';
+                console.log(`[SI] ⬇️  Hydraté depuis serveur : ${key} (${n})`);
+              } else {
+                // Local plus récent → pousser local vers serveur et garder local en UI
+                const localVal = lsLoad(key, fallback);
+                if (localVal !== null && localVal !== undefined) {
+                  setters.forEach(fn => fn(localVal));
+                  dsSave(key, localVal).catch(() => {});
+                  console.log(`[SI] ⬆️  Local plus récent — push vers serveur : ${key}`);
+                } else {
+                  // Pas de local valide → utiliser serveur quand même
+                  lsSave(key, serverVal);
+                  setters.forEach(fn => fn(serverVal));
+                }
+              }
 
             } else if (key === 'users') {
               // ══ CAS B : clé ABSENTE du serveur, mais 'gc-users' existe ══

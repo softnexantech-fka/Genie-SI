@@ -528,8 +528,22 @@ async function initWebSocket() {
     });
 
     // Notification changement de données → invalider cache + notifier React
-    _socket.on('data_changed', ({ key, action, by, ts, itemId }) => {
+    _socket.on('data_changed', ({ key, action, by, ts, updatedAt, itemId }) => {
       if (!key) return;
+
+      // Protection contre les régressions temps-réel :
+      // si notre dernière écriture locale est plus récente que ce broadcast, on ignore.
+      if (action === 'set') {
+        try {
+          const localWriteTs = parseInt(_lsGet('__ts__:' + key) || '0');
+          const serverBroadcastTs = updatedAt || ts || 0;
+          if (localWriteTs > serverBroadcastTs) {
+            // Notre donnée locale est plus récente — ne pas invalider le cache
+            return;
+          }
+        } catch {}
+      }
+
       _cache.delete(key);
       _pendingFetches.delete(key);
 
@@ -797,6 +811,8 @@ export async function dsGet(key, fallback = null) {
       const json = await r.json();
       const val  = json.value ?? fallback;
       _cache.set(key, { data: val, ts: Date.now() });
+      // Stocker le timestamp serveur pour comparaison lors de l'hydratation
+      if (json.updatedAt) try { _lsSet('__svts__:' + key, String(json.updatedAt)); } catch {}
       return val;
     } catch (e) {
       if (e.name !== 'AbortError') console.warn(`[DS] Réseau ${key}:`, e.message);
@@ -814,7 +830,10 @@ export async function dsGet(key, fallback = null) {
 // pour les suppressions intentionnelles (dsDeleteItem, dsDeleteItemFromArray).
 export async function dsSave(key, value, userId = null, options = {}) {
   lsSave(key, value);
-  _cache.set(key, { data: value, ts: Date.now() });
+  const _writeNow = Date.now();
+  _cache.set(key, { data: value, ts: _writeNow });
+  // Estampille locale : permet à l'hydratation de comparer avec updated_at serveur
+  try { _lsSet('__ts__:' + key, String(_writeNow)); } catch {}
 
   if (!isSharedKey(key)) return { ok: true, local: true };
 
