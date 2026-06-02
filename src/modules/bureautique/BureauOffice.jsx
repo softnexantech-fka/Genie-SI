@@ -41,10 +41,16 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
     const map = { "rh": "sirh", "gestion_docs": "docs_app" };
     return map[id] || id;
   };
+  const VALID_APP_IDS = new Set(["writer","tableur","presentation","formulaires","conventions","gestion_rapide","kanban","docs_app","juridique","audit","finance","conseil","sirh","conformite","communication","logistique","facturation","rapport_activite","indicateurs"]);
   const [activeApp, setActiveAppRaw] = useState(() => {
     const fromProp = resolveInitialApp(initialApp);
-    if (fromProp) return fromProp;
-    try { return sessionStorage.getItem('gc-bureau-app') || null; } catch (_) { return null; }
+    if (fromProp && VALID_APP_IDS.has(fromProp)) return fromProp;
+    try {
+      const stored = sessionStorage.getItem('gc-bureau-app');
+      if (stored && VALID_APP_IDS.has(stored)) return stored;
+      if (stored) sessionStorage.removeItem('gc-bureau-app'); // purge valeur périmée
+      return null;
+    } catch (_) { return null; }
   });
   const [accessDeniedApp, setAccessDeniedApp] = useState(null);
   const [promoCodeInput, setPromoCodeInput] = useState("");
@@ -54,8 +60,12 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
 
   const [lastVisits, setLastVisits] = useState(()=>{ try{ return JSON.parse(_lsGet("gc-bureau-lastvisits")||"{}") }catch (_) {return{};} });
   const setActiveApp = React.useCallback((appId)=>{
-    setLastVisits(prev=>{ const n={...prev,[appId]:new Date().toISOString()}; try{_lsSet("gc-bureau-lastvisits",JSON.stringify(n));}catch (_) {} return n; });
-    try { sessionStorage.setItem('gc-bureau-app', appId); } catch (_) {}
+    if (appId) {
+      setLastVisits(prev=>{ const n={...prev,[appId]:new Date().toISOString()}; try{_lsSet("gc-bureau-lastvisits",JSON.stringify(n));}catch (_) {} return n; });
+      try { sessionStorage.setItem('gc-bureau-app', appId); } catch (_) {}
+    } else {
+      try { sessionStorage.removeItem('gc-bureau-app'); } catch (_) {}
+    }
     setActiveAppRaw(appId);
   },[]);
 
@@ -2923,6 +2933,9 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
   );
 
 
+  // activeApp ne correspond à aucune app connue (sessionStorage périmé) → retour accueil
+  setActiveApp(null);
+  try { sessionStorage.removeItem('gc-bureau-app'); } catch (_) {}
   return null;
 }); // React.memo — BureauOffice
 
