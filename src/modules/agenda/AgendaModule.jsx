@@ -44,6 +44,8 @@ export function AgendaModule({ rdvs: rdvsData, users=[], localUser, T, dossiers=
   const [rdvStatusFilter, setRdvStatusFilter] = useState("ALL");
   const [rdvAssigneeFilter, setRdvAssigneeFilter] = useState("ALL");
 
+  useRemoteSync({ 'rdvs': setLocalRdvs });
+
   useEffect(() => { setLocalRdvs(rdvsData); }, [rdvsData]);
 
   const myRdvs = localRdvs.filter(r =>

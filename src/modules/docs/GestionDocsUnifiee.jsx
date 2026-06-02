@@ -1057,7 +1057,7 @@ Notes : ${client.notes||"Aucune"}`;
                           </div>
                         </div>
                         <div style={{display:"flex",gap:3,flexShrink:0}}>
-                          {(d.url||d.dataUrl)&&<button onClick={async ()=>{const a=document.createElement("a");a.href=d.url||d.dataUrl;a.download=d.name||"doc";a.click();}} style={{background:"#3B82F622",border:"none",borderRadius:5,padding:"3px 7px",cursor:"pointer",fontSize:9,color:"#3B82F6"}}>⬇</button>}
+                          {(d.url||d.dataUrl||d.serverUrl||d.serverId)&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"none",borderRadius:5,padding:"3px 7px",cursor:"pointer",fontSize:9,color:"#3B82F6"}}>⬇</button>}
                           {canValidateKYC&&isKyc&&!d.validated&&!d.rejected&&<button onClick={()=>handleValidateIntakeDoc(d.id,true)} style={{background:"#22C55E22",border:"none",borderRadius:5,padding:"2px 5px",cursor:"pointer",fontSize:9,color:"#22C55E"}}>✅</button>}
                           <button onClick={async () => {if(await gcConfirm("Supprimer ce document ?"))saveDocs(docs.filter(x=>x.id!==d.id));}} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:11}}>🗑️</button>
                         </div>

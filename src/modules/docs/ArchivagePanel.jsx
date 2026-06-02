@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // ArchivagePanel.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, playSound, formatDate, _activeUser, formatDateTime, getProcColor, ALPHA_SEQ , dsSave } from '../../core/index.js';
+import { gcDownloadDoc } from '../../core/constants.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { INITIAL_ARCHIVES, CODES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
@@ -429,7 +430,7 @@ export function ArchivagePanel({ dossiers=[], T, localUser, users=[], setNotific
                 <div style={{ color:T.textMuted, fontSize:10 }}>{doc.ref} • {formatDate(doc.date)} • {doc.size}</div>
               </div>
               <div style={{ display:"flex", gap:5 }}>
-                <button title="Télécharger" style={{ background:"#3B82F622", border:"1px solid #3B82F644", borderRadius:6, padding:"4px 8px", color:"#3B82F6", cursor:"pointer", fontSize:11 }}>⬇</button>
+                <button onClick={()=>gcDownloadDoc({serverUrl:doc.serverUrl,serverId:doc.serverId,url:doc.url,dataUrl:doc.dataUrl,nom:doc.name,name:doc.name})} title="Télécharger" style={{ background:"#3B82F622", border:"1px solid #3B82F644", borderRadius:6, padding:"4px 8px", color:"#3B82F6", cursor:"pointer", fontSize:11 }}>⬇</button>
                 {localUser.level >= 2 && <button onClick={()=>{
                   setArchiveForm(f=>({...f,objet:doc.name,ref:doc.ref}));
                   setShowArchiveForm(true);
