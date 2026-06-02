@@ -22,6 +22,8 @@ export function CommunicationApp({ T, currentUser, setNotifications=_noop }){
   const [ficheSecteurFilter, setFicheSecteurFilter] = useState("ALL");
   const [campagnes, setCampagnes] = useState(() => { try { return JSON.parse(_lsGet("gc-comm-campagnes")||"[]"); } catch (_) { return []; }});
   const [contacts, setContacts] = useState(() => { try { return JSON.parse(_lsGet("gc-comm-contacts")||"[]"); } catch (_) { return [{id:"CT-001",nom:"Journal L'Union",type:"MEDIA",email:"redaction@union.ga",telephone:"+241 74 00 00",actif:true},{id:"CT-002",nom:"Gabon TV",type:"MEDIA",email:"contact@gabontv.ga",telephone:"+241 76 00 00",actif:true},{id:"CT-003",nom:"Radio Gabon",type:"MEDIA",email:"info@radiogabon.ga",telephone:"+241 72 00 00",actif:true}]; }});
+  const [fiches, setFiches] = useState(()=>{try{return JSON.parse(_lsGet("gc-comm-fiches")||"[]");}catch(_){return [];}});
+  const [customTemplates, setCustomTemplates] = useState(()=>{try{return JSON.parse(_lsGet("gc-comm-custom-tpl")||"[]");}catch(_){return [];}});
   const [kpiComm] = useState({ publications:12, reach:3400, leads:8, conversions:3 });
   const [campForm, setCampForm] = useState({ titre:"", type:"DIGITAL", canal:"LINKEDIN", budget:"", debut:"", fin:"", objectif:"", statut:"PLANIFIE" });
   const [contForm, setContForm] = useState({ nom:"", type:"MEDIA", email:"", telephone:"", organisation:"" });
@@ -121,13 +123,11 @@ export function CommunicationApp({ T, currentUser, setNotifications=_noop }){
   ];
 
   // ── État fiches prospection ─────────────────────────────────────────────
-  const [fiches, setFiches] = useState(()=>{try{return JSON.parse(_lsGet("gc-comm-fiches")||"[]");}catch(_){return [];}});
   const saveFiches = f=>{setFiches(f);try{_lsSet("gc-comm-fiches",JSON.stringify(f)); dsSave("gc-comm-fiches",f).catch(()=>{});}catch(_){}};
   const [ficheForm, setFicheForm] = useState({prospect:"",secteur:"",contact:"",telephone:"",email:"",besoins:"",offre:"",priorite:"NORMALE",statut:"NOUVEAU",notes:"",dateRelance:""});
   const [editFiche, setEditFiche] = useState(null);
   const [showFicheForm, setShowFicheForm] = useState(false);
   // ── État modèles personnalisés ─────────────────────────────────────────
-  const [customTemplates, setCustomTemplates] = useState(()=>{try{return JSON.parse(_lsGet("gc-comm-custom-tpl")||"[]");}catch(_){return [];}});
   const saveTemplates = t=>{setCustomTemplates(t);try{_lsSet("gc-comm-custom-tpl",JSON.stringify(t)); dsSave("gc-comm-custom-tpl",t).catch(()=>{});}catch(_){}};
   const [tplForm, setTplForm] = useState({titre:"",type:"OFFRE",canal:"EMAIL",sujet:"",corps:"",tags:""});
   const [showTplForm, setShowTplForm] = useState(false);
