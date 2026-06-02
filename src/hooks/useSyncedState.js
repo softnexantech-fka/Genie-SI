@@ -99,4 +99,34 @@ export function useSyncedState(key, fallback = null) {
   return [data, setSyncedData, deleteItem, setSyncedDataForce];
 }
 
+/**
+ * Écoute les changements distants (data_changed WebSocket → StorageEvent __GC__key)
+ * et rafraîchit les états React du module appelant.
+ *
+ * Usage:
+ *   useRemoteSync({
+ *     'gc-factures':   setFactures,
+ *     'gc-journal':    setJournal,
+ *   });
+ */
+export function useRemoteSync(syncMap) {
+  const mapRef = useRef(syncMap);
+  mapRef.current = syncMap; // toujours à jour sans re-créer l'effet
+
+  useEffect(() => {
+    const handler = async (e) => {
+      if (!e.key?.startsWith('__GC__')) return;
+      const key = e.key.slice(6);
+      const setter = mapRef.current[key];
+      if (!setter) return;
+      try {
+        const val = await dsGet(key, null);
+        if (val !== null && val !== undefined) setter(val);
+      } catch {}
+    };
+    window.addEventListener('storage', handler);
+    return () => window.removeEventListener('storage', handler);
+  }, []);
+}
+
 export default { useSyncedState };

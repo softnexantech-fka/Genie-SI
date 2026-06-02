@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // AuditApp.jsx — SI Génie Consultant v129
-import { _lsGet, _lsSet, _noop, playSound, gcAIAsk, dsSave, dsDeleteItemFromArray } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, playSound, gcAIAsk, dsSave, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, gcOpenPrintWindow } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
 
@@ -111,6 +112,23 @@ export function AuditApp({ T, currentUser, setNotifications=_noop, setTaches=_no
   const [gTacheEditId, setGTacheEditId] = React.useState(null);
   const [gFilter, setGFilter] = React.useState("TOUS");
   const [gFilterEff, setGFilterEff] = React.useState("TOUS");
+
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-audit-checklist':        setCheckState,
+    'gc-audit-checklist-custom': setCustomChecklists,
+    'gc-audit-actions':          setActions,
+    'gc-audit-prog':             setProgs,
+    'gc-feuille-tests':          setTests,
+    'gc-tpa':                    setTpaMissions,
+    'gc-audit-grille-taches':    setGTaches,
+    'gc-pca-risques':            setPcaRisques,
+    'gc-pca-procedures':         setPcaProc,
+    'gc-pca-tests':              setPcaTest,
+    'gc-coso-scores':            setCosoScores,
+    'gc-coso-custom-q':          setCosoCustomQ,
+    'gc-coso-notes':             setCosoNotes,
+  });
 
   const addTpaMission = () => {
     if(!tpaForm.mission.trim()) return;

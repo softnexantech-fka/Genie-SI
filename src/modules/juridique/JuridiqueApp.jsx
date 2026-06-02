@@ -3,6 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // JuridiqueApp.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, playSound, useSI, gcFileSave , dsSave, dsOnSync, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
@@ -74,6 +75,15 @@ export function JuridiqueApp({ T, currentUser, setNotifications=_noop, dossiers=
   const [veilleDocRef, setVeilleDocRef] = useState(null);
   const fileInputRef = useRef(null);
   const veilleFileRef = useRef(null);
+
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-jur-docs':           setUploadedDocs,
+    'gc-jur-kyc':            setKycClients,
+    'gc-jur-veille':         setVeille,
+    'gc-jur-custom-laws':    setCustomLaws,
+    'gc-jur-custom-modeles': setCustomModeles,
+  });
 
   const OHADA_ACTS = [
     { id:"AUS",label:"Acte Uniforme Sociétés Commerciales",desc:"SARL, SA, SNC — Constitution, gestion, dissolution",ref:"OHADA AUS",color:"#DC2626" },

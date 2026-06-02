@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // FinanceApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, dsOnSync, gcSyncAuthUsers, dsDeleteItemFromArray } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, dsOnSync, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { CoverPage, CreateAccountPage, LoginPage } from '../../components/Auth.jsx';
@@ -56,6 +57,13 @@ export function OHADARefApp({ T, currentUser, journalEntries=[], setJournalEntri
   const [docType, setDocType] = useState("AUDSC");
   const [numSeries, setNumSeries] = useState(()=>{try{return JSON.parse(_lsGet("gc-piece-series")||"null")||{AC:{prefix:"AC",seq:1},VT:{prefix:"VT",seq:1},BQ:{prefix:"BQ",seq:1},PE:{prefix:"PE",seq:1},OD:{prefix:"OD",seq:1}};}catch (_) {return {AC:{prefix:"AC",seq:1},VT:{prefix:"VT",seq:1},BQ:{prefix:"BQ",seq:1},PE:{prefix:"PE",seq:1},OD:{prefix:"OD",seq:1}};}});
   const fileRef = useRef(null);
+
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-ohada-docs':   setUploadedDocs,
+    'gc-ohada-custom': setCustomComptes,
+    'gc-piece-series': setNumSeries,
+  });
 
   const allComptes = [...PLAN_COMPTABLE_OHADA, ...customComptes];
   const filtered = allComptes.filter(c=>(filterCl==="all"||String(c.cl)===filterCl)&&(!search||(c.num+c.lib).toLowerCase().includes(search.toLowerCase())));
@@ -347,6 +355,12 @@ export function FacturationModule({ T, currentUser, dossiers=[], partners=[], jo
   const [filterStatus, setFilterStatus] = React.useState("ALL");
   const [showDetail, setShowDetail] = React.useState(null);
   const [showSigModal, setShowSigModal] = React.useState(null);
+
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-factures': setFactures,
+    'gc-devis':    setDevis,
+  });
 
   const STATUS_FACT = {
     BROUILLON:  {l:"Brouillon",   c:"#6B7280", icon:"📝"},
@@ -1077,6 +1091,7 @@ export function ConventionModule({ T, currentUser, dossiers=[], partners=[], use
     setConventions(data);
     try { _lsSet("gc-conventions", JSON.stringify(data.slice(0,200))); dsSave("gc-conventions", data.slice(0,200)).catch(err => gcToast.syncError('', err)); } catch(_) {}
   };
+  useRemoteSync({ 'gc-conventions': setConventions });
 
   const convInit = {
     client:"", objet:"", processus:"O02", typeConvention:"LETTRE_MISSION",

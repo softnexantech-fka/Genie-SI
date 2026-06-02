@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // SIRHModule.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, formatDate, gcFileSave, _activeUser, getProcColor , dsSave } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, formatDate, gcFileSave, _activeUser, getProcColor , dsSave, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { INITIAL_SIRH_PRESENCES, INITIAL_SIRH_LEAVES, INITIAL_RECRUTEMENTS, CODES, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
 import { FiscalConfigPanel } from '../admin/SIConfigPanels.jsx';
@@ -329,6 +330,14 @@ export function SIRHModule({ T, currentUser, users=[], setUsers=_noop, setNotifi
   // ── Évaluations du personnel ─────────────────────────────────────────────
   const [evaluations, setEvaluations] = useState(()=>{try{return JSON.parse(_lsGet("gc-sirh-evaluations")||"[]");}catch(_){return [];}});
   const saveEvaluations = v=>{setEvaluations(v);try{_lsSet("gc-sirh-evaluations",JSON.stringify(v));dsSave('gc-sirh-evaluations',v).catch(err => gcToast.syncError('', err));}catch(_){}};
+
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-sirh-presences':     setPresences,
+    'gc-sirh-leaves':        setLeaves,
+    'gc-sirh-recrutements':  setRecrutements,
+    'gc-sirh-evaluations':   setEvaluations,
+  });
 
   const TABS = [
     {id:"dashboard",l:"📊 Tableau de bord"},{id:"presences",l:"⏱️ Présences"},

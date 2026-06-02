@@ -1,7 +1,7 @@
 // KYCWorkflowModule.jsx — Gestion des workflows KYC pour Conformité
 import React, { useState, useEffect } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
-import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, dsSave, dsLoad } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, dsSave, dsLoad, getProxyUrl } from '../../core/index.js';
 import { Btn, Modal, InputField, SelectField, Tabs } from '../../components/UI.jsx';
 
 /**
@@ -20,7 +20,7 @@ export function useKYCSubmit() {
         return { ok: false, error: 'Pas d\'authentification' };
       }
 
-      const response = await fetch('/api/kyc/submit', {
+      const response = await fetch(`${getProxyUrl()}/api/kyc/submit`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -193,7 +193,7 @@ export function KYCWorkflowsPanel({
   const handleAssign = async (workflowId, assigneeId) => {
     try {
       const token = _lsGet('auth-token');
-      const response = await fetch('/api/kyc/assign', {
+      const response = await fetch(`${getProxyUrl()}/api/kyc/assign`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -218,7 +218,7 @@ export function KYCWorkflowsPanel({
   const handleEvaluate = async (workflowId) => {
     try {
       const token = _lsGet('auth-token');
-      const response = await fetch('/api/kyc/evaluate', {
+      const response = await fetch(`${getProxyUrl()}/api/kyc/evaluate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

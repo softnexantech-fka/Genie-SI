@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // ConformiteApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, playSound, _activeUser, getProcColor, gcAIAsk, daysLeft, dsSave, dsDeleteItemFromArray, dsLoad, dsOnSync } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, playSound, _activeUser, getProcColor, gcAIAsk, daysLeft, dsSave, dsDeleteItemFromArray, dsLoad, dsOnSync, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { CODES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { KYCWorkflowsPanel } from './KYCWorkflowModule.jsx';
@@ -23,6 +24,7 @@ export function NonConformitesPanel({ T, currentUser, setNotifications=_noop, ta
   const [ncSort, setNcSort] = React.useState("date_desc");
   const [form, setForm] = React.useState({titre:"",processus:"O02",type:"MINEURE",cause:"",actionCorrective:"",responsable:"",echeance:"",statut:"OUVERT"});
   const saveNcs = (d)=>{setNcs(d);try{_lsSet("gc-nc",JSON.stringify(d));dsSave("gc-nc",d).catch(err => gcToast.syncError('', err));}catch (_) {};};
+  useRemoteSync({ 'gc-nc': setNcs });
   const NC_TYPES = {MINEURE:{c:"#F59E0B",label:"Mineure"},MAJEURE:{c:"#EF4444",label:"Majeure"},CRITIQUE:{c:"#DC2626",label:"Critique"},OBSERVATION:{c:"#3B82F6",label:"Observation"}};
   return <div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -207,19 +209,16 @@ export function ConformiteFull({ T, currentUser, users=[], setNotifications=_noo
     if(!isDemoMode) try{_lsSet("gc-kyc-workflows",JSON.stringify(resolved));dsSave("gc-kyc-workflows",resolved).catch(err => gcToast.syncError('', err));}catch (_) {}
   };
 
-  // Sync temps réel des workflows KYC
-  useEffect(() => {
-    const unsub = dsOnSync((key) => {
-      if (key === 'gc-kyc-workflows') {
-        dsLoad('gc-kyc-workflows').then(data => {
-          if (Array.isArray(data)) {
-            setKycWorkflowsRaw(data);
-          }
-        });
-      }
-    });
-    return unsub;
-  }, []);
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-kyc-workflows':     setKycWorkflowsRaw,
+    'gc-conffull-approvals': setApprovals,
+    'gc-conffull-kpi':       setIndicators,
+    'gc-conffull-checks':    setChecks,
+    'gc-conffull-veille':    setVeille,
+    'gc-obligations':        setObligations,
+    'gc-rgpd-traitements':   setRgpdTraitements,
+  });
 
   const OBL_STATUT = { A_REALISER:{c:"#F59E0B",l:"À réaliser"},EN_COURS:{c:"#3B82F6",l:"En cours"},REALISE:{c:"#22C55E",l:"Réalisé"},EN_RETARD:{c:"#EF4444",l:"En retard"} };
   const DOMAINES_OBL = ["RGPD","Fiscal","RH/Social","Comptable","Sectoriel","Sécurité","Autre"];
