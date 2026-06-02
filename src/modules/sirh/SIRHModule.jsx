@@ -331,6 +331,9 @@ export function SIRHModule({ T, currentUser, users=[], setUsers=_noop, setNotifi
   const [evaluations, setEvaluations] = useState(()=>{try{return JSON.parse(_lsGet("gc-sirh-evaluations")||"[]");}catch(_){return [];}});
   const saveEvaluations = v=>{setEvaluations(v);try{_lsSet("gc-sirh-evaluations",JSON.stringify(v));dsSave('gc-sirh-evaluations',v).catch(err => gcToast.syncError('', err));}catch(_){}};
 
+  // ── Fichiers RH (contrats, fiches de paie…) ──────────────────────────────
+  const [fichiers, setFichiers] = useState(() => { try { return JSON.parse(_lsGet("gc-sirh-fichiers")||"null") || []; } catch (_) { return []; } });
+
   // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
   useRemoteSync({
     'gc-sirh-presences':     setPresences,
@@ -2168,7 +2171,6 @@ export function BaseFichiersRH({ T, currentUser, users=[], isDemoMode=false }) {
   const gcConfirm = (msg, title, icon, danger) => _dlg.confirm(msg, title, icon, danger);
   const gcPrompt  = (msg, def, title, icon) => _dlg.prompt(msg, def, title, icon);
 
-  const [fichiers, setFichiers] = useState(() => { try { return JSON.parse(_lsGet("gc-sirh-fichiers")||"null") || []; } catch (_) { return []; } });
   const [selectedUser, setSelectedUser] = useState("");
   const [selectedType, setSelectedType] = useState("ALL");
   const [showUpload, setShowUpload] = useState(false);
