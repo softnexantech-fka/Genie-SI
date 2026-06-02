@@ -655,7 +655,7 @@ export function AdminConnexionsTab(props) {
     }
     // FIX v132 — Notifier le collaborateur avec le code ET le type de demande clairement
     try {
-      const k=`GC_SI_v12:notif:${req.userId}`;
+      const k=`gc-notif-${req.userId}`;
       const ex=JSON.parse(_lsGet(k)||"[]");
       const typeLabel = req.type==="SUSPENDU" ? "compte suspendu" : "connexion hors horaires";
       const n={
@@ -710,7 +710,7 @@ export function AdminConnexionsTab(props) {
     } catch(_) {}
     if (setPendingConnections) setPendingConnections(prev => prev.filter(r => r.id !== req.id));
     try {
-      const k=`GC_SI_v12:notif:${req.userId}`;
+      const k=`gc-notif-${req.userId}`;
       const ex=JSON.parse(_lsGet(k)||"[]");
       const lockMsg = rejData.count>=5 ? ` 🔒 Trop de rejets — nouvelle demande impossible pendant 30 min.` : ` (${5-rejData.count} tentative(s) restante(s) avant verrouillage 30 min)`;
       const n={id:"N"+Date.now(),icon:"🚫",message:`❌ Demande de connexion refusée par ${rejectedReq.rejectedBy}.${lockMsg}`,at:new Date().toISOString(),read:false};
@@ -1355,7 +1355,7 @@ ${targetUser.name} sera suspendu(e) seulement après approbation DG.`);
         at:new Date().toISOString(), read:false, module:"gestion_comptes", targetUsers:[dgUser.id]
       },...prev]);
       // Push notif LS to DG
-      if (dgUser) { try { const k=`GC_SI_v12:notif:${dgUser.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); ex.unshift({id:"N"+Date.now(),icon:"✅",message:`[RH→DG] Réactivation compte ${targetUser.name} à approuver`,at:new Date().toISOString(),read:false,module:"gestion_comptes",urgent:true}); _lsSet(k,JSON.stringify(ex.slice(0,200))); } catch(_) {} }
+      if (dgUser) { try { const k=`gc-notif-${dgUser.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); ex.unshift({id:"N"+Date.now(),icon:"✅",message:`[RH→DG] Réactivation compte ${targetUser.name} à approuver`,at:new Date().toISOString(),read:false,module:"gestion_comptes",urgent:true}); _lsSet(k,JSON.stringify(ex.slice(0,200))); } catch(_) {} }
       gcAlert(`⏳ Demande de réactivation soumise au Directeur Général.
 ${targetUser.name} sera réactivé(e) seulement après approbation DG.`);
       return;
@@ -1939,7 +1939,7 @@ ${targetUser.name} sera réactivé(e) seulement après approbation DG.`);
                     notify("🔑", `[CONNEXION APPROUVÉE] ${req.userName} — Code : ${req.approvedCode}`, "gestion_comptes");
                     // Notifier le collaborateur
                     try {
-                      const k=`GC_SI_v12:notif:${req.userId}`;
+                      const k=`gc-notif-${req.userId}`;
                       const ex=JSON.parse(_lsGet(k)||"[]");
                       const typeLabel = req.type==="SUSPENDU"?"compte suspendu":"connexion hors horaires";
                       _lsSet(k,JSON.stringify([{id:"N"+Date.now()+req.userId,icon:"🔑",
@@ -1979,7 +1979,7 @@ ${targetUser.name} sera réactivé(e) seulement après approbation DG.`);
                   });
                   // FIX v132 — Notifier le collaborateur via LS (il le voit dans ses notifs SI)
                   try {
-                    const k=`GC_SI_v12:notif:${req.userId}`;
+                    const k=`gc-notif-${req.userId}`;
                     const ex=JSON.parse(_lsGet(k)||"[]");
                     const typeLabel = req.type==="SUSPENDU" ? "compte suspendu" : "connexion hors horaires";
                     const n={id:"N"+Date.now(),icon:"🔑",
@@ -2250,14 +2250,14 @@ ${targetUser.name} sera réactivé(e) seulement après approbation DG.`);
                       dsSave('users', updated);  // [FIX-SYNC] Persist suspension/reactivation/deletion
                       if (setPendingAccountActions) setPendingAccountActions(prev=>prev.map(a=>a.id===action.id?{...a,status:"APPROUVE_DG",dgResponse:`Approuvé par ${localUser.name}`,dgResponseAt:new Date().toISOString()}:a));
                       setNotifications&&setNotifications(prev=>[{id:"N"+Date.now(),icon:"✅",message:`✅ ${action.type} de ${action.targetUserName} approuvée par ${localUser.name} et exécutée`,at:new Date().toISOString(),read:false,module:"gestion_comptes"},...prev]);
-                      try{const k=`GC_SI_v12:notif:${action.targetUserId}`;const ex=JSON.parse(_lsGet(k)||"[]");ex.unshift({id:"N"+Date.now(),icon:"✅",message:`Décision DG : ${action.type} de votre compte ${action.type==="RH_REACTIVATION"||action.type==="REACTIVATION"?"→ Réactivé":"→ Suspendu"} par ${localUser.name}`,at:new Date().toISOString(),read:false,urgent:true});_lsSet(k,JSON.stringify(ex.slice(0,200)));} catch(_){}
+                      try{const k=`gc-notif-${action.targetUserId}`;const ex=JSON.parse(_lsGet(k)||"[]");ex.unshift({id:"N"+Date.now(),icon:"✅",message:`Décision DG : ${action.type} de votre compte ${action.type==="RH_REACTIVATION"||action.type==="REACTIVATION"?"→ Réactivé":"→ Suspendu"} par ${localUser.name}`,at:new Date().toISOString(),read:false,urgent:true});_lsSet(k,JSON.stringify(ex.slice(0,200)));} catch(_){}
                     }} style={{background:"#22C55E",border:"none",color:"#fff",borderRadius:7,padding:"6px 16px",cursor:"pointer",fontWeight:700,fontSize:11}}>
                       ✅ Approuver & Exécuter
                     </button>
                     <button onClick={() => {
                       if (setPendingAccountActions) setPendingAccountActions(prev=>prev.map(a=>a.id===action.id?{...a,status:"REJETE_DG",dgResponse:`Refusé par ${localUser.name}`,dgResponseAt:new Date().toISOString()}:a));
                       setNotifications&&setNotifications(prev=>[{id:"N"+Date.now(),icon:"❌",message:`❌ ${action.type} de ${action.targetUserName} refusée par ${localUser.name}`,at:new Date().toISOString(),read:false},...prev]);
-                      try{const k=`GC_SI_v12:notif:${action.targetUserId}`;const ex=JSON.parse(_lsGet(k)||"[]");ex.unshift({id:"N"+Date.now(),icon:"❌",message:`Décision DG : Demande de ${action.type} refusée par ${localUser.name}`,at:new Date().toISOString(),read:false});_lsSet(k,JSON.stringify(ex.slice(0,200)));} catch(_){}
+                      try{const k=`gc-notif-${action.targetUserId}`;const ex=JSON.parse(_lsGet(k)||"[]");ex.unshift({id:"N"+Date.now(),icon:"❌",message:`Décision DG : Demande de ${action.type} refusée par ${localUser.name}`,at:new Date().toISOString(),read:false});_lsSet(k,JSON.stringify(ex.slice(0,200)));} catch(_){}
                     }} style={{background:"#EF444422",border:"1px solid #EF444444",color:"#EF4444",borderRadius:7,padding:"6px 16px",cursor:"pointer",fontWeight:700,fontSize:11}}>
                       ❌ Refuser
                     </button>

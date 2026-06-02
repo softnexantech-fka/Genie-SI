@@ -1849,7 +1849,7 @@ export default function App() {
           lsLoadSecure("users", null),
           lsLoadSecure("dossiers", null),
           lsLoadSecure("taches", null),
-          lsLoadSecure("session-logs", null),
+          lsLoadSecure("gc-session-logs", null),
         ]);
         if (secUsers !== null) { setProdUsers(secUsers); setUsersState(secUsers); }
         if (secDossiers !== null) { setProdDossiers(secDossiers); setDossiersState(secDossiers); }

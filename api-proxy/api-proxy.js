@@ -232,6 +232,8 @@ const ALLOWED_KEYS = new Set([
   'gc-printers', 'gc-print-queue', 'gc-prefill-facture', 'gc-bureau-lastvisits',
   'gc-kpi-alerts', 'gc-kpi-dg-view', 'gc-si-source', 'gc-ai-delays',
   'gc-anti-redondance-v1',
+  // ── FIX vNext : Clé notifications manquante ──────────────────────────
+  'notifications',
 ]);
 
 // [C3][C9] Validation clé autorisée — préfixes dynamiques inclus
