@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // BudgetRapide.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 
 export function BudgetRapideApp({ T, currentUser, setNotifications=_noop }){
@@ -15,7 +16,9 @@ export function BudgetRapideApp({ T, currentUser, setNotifications=_noop }){
   const [filter, setFilter] = useState("all");
   const CATS_DEPENSES=["Fournitures","Transport","Repas","Loyer","Services","Salaires","Impôts","Autre"];
   const CATS_ENTREES=["Honoraires","Prestation","Subvention","Remboursement","Autre"];
-  const save=d=>{setEntrees(d);try{_lsSet("gc-budget-rapide",JSON.stringify(d.slice(0,500)));}catch (_) {}};
+  useRemoteSync({'gc-budget-rapide': setEntrees});
+
+  const save=d=>{setEntrees(d);try{const trimmed=d.slice(0,500);_lsSet("gc-budget-rapide",JSON.stringify(trimmed));dsSave("gc-budget-rapide",trimmed).catch(()=>{});}catch (_) {}};
   const addEntry=()=>{
     if(!form.label||!form.montant){gcAlert("Libellé et montant requis.");return;}
     const e={id:"BR"+Date.now(),...form,montant:parseFloat(form.montant)||0,createdBy:currentUser?.name,createdAt:new Date().toISOString()};

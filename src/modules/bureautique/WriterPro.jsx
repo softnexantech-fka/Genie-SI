@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // WriterPro.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, gcCodifDOC, gcFileSave } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, gcCodifDOC, gcFileSave, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 
 export function WriterProApp({ T, currentUser, setNotifications=_noop}){
@@ -82,9 +83,15 @@ export function WriterProApp({ T, currentUser, setNotifications=_noop}){
   const FONT_SIZES = [8,9,10,11,12,13,14,16,18,20,22,24,26,28,32,36,40,48,56,64,72,96];
 
   // ── Document ops ──────────────────────────────────────────────────────────
+  useRemoteSync({'gc-writer-pro-v2': setDocs});
+
   const saveDocs = d => {
     setDocs(d);
-    try{_lsSet("gc-writer-pro-v2",JSON.stringify(d.slice(0,50).map(x=>({...x,content:x.content?.slice(0,100000)}))));}catch(_){}
+    try{
+      const trimmed = d.slice(0,50).map(x=>({...x,content:x.content?.slice(0,100000)}));
+      _lsSet("gc-writer-pro-v2",JSON.stringify(trimmed));
+      dsSave("gc-writer-pro-v2", trimmed).catch(()=>{});
+    }catch(_){}
   };
 
   const saveDoc = () => {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // ConseilApp.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _lsRm, _noop, gcCopy, _activeUser, gcAIAsk, dsSave, dsOnSync, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, ProgressBar} from '../../components/UI.jsx';
 
 export function CompetitivitePanel({ T, currentUser, setNotifications=_noop }){
@@ -299,7 +300,7 @@ export function AmelioContenuPanel({ T, currentUser, setNotifications=_noop, tac
 
   // -- PLAN D'ACTIONS d'amélioration --
   const [actions, setActions] = React.useState(()=>{try{return JSON.parse(_lsGet("gc-amelio-actions")||"null")||[];}catch(_){return [];}});
-  const saveActions = d => {try{_lsSet("gc-amelio-actions",JSON.stringify(d));}catch(_){}};
+  const saveActions = d => {setActions(d);try{_lsSet("gc-amelio-actions",JSON.stringify(d)); dsSave("gc-amelio-actions",d).catch(()=>{});}catch(_){}};
   const [actionForm, setActionForm] = React.useState({titre:"",type:"CORRECTION",priorite:"HAUTE",responsable:"",echeance:"",source:"",statut:"EN_COURS",description:""});
   const [showActionForm, setShowActionForm] = React.useState(false);
   const [editAction, setEditAction] = React.useState(null);
@@ -307,13 +308,14 @@ export function AmelioContenuPanel({ T, currentUser, setNotifications=_noop, tac
 
   // -- KPIs SUIVI --
   const [kpiItems, setKpiItems] = React.useState(()=>{try{return JSON.parse(_lsGet("gc-amelio-kpis")||"null")||[];}catch(_){return [];}});
-  const saveKpis = d => {try{_lsSet("gc-amelio-kpis",JSON.stringify(d));}catch(_){}};
+  const saveKpis = d => {setKpiItems(d);try{_lsSet("gc-amelio-kpis",JSON.stringify(d)); dsSave("gc-amelio-kpis",d).catch(()=>{});}catch(_){}};
   const [kpiForm, setKpiForm] = React.useState({nom:"",unite:"",cible:"",actuel:"",frequence:"MENSUEL",responsable:""});
   const [showKpiForm, setShowKpiForm] = React.useState(false);
 
   // -- NON-CONFORMITÉS --
   const [ncs, setNcs] = React.useState(()=>{try{return JSON.parse(_lsGet("gc-amelio-ncs")||"null")||[];}catch(_){return [];}});
-  const saveNcs = d => {try{_lsSet("gc-amelio-ncs",JSON.stringify(d));}catch(_){}};
+  const saveNcs = d => {setNcs(d);try{_lsSet("gc-amelio-ncs",JSON.stringify(d)); dsSave("gc-amelio-ncs",d).catch(()=>{});}catch(_){}};
+  useRemoteSync({'gc-amelio-actions': setActions, 'gc-amelio-kpis': setKpiItems, 'gc-amelio-ncs': setNcs});
   const [ncForm, setNcForm] = React.useState({description:"",processus:"",gravite:"MAJEURE",detecte_par:"",action_immediate:"",statut:"OUVERTE"});
   const [showNcForm, setShowNcForm] = React.useState(false);
 
@@ -882,11 +884,11 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
     check:{resultats:"",ecarts:"",analyse:""},
     act:{ameliorations:"",standardisation:"",prochaine_cycle:""}
   }; } catch (_) { return {plan:{objectif:"",actions:"",ressources:"",echeance:"",indicateurs:""},do:{responsable:"",avancement:0,notes:""},check:{resultats:"",ecarts:"",analyse:""},act:{ameliorations:"",standardisation:"",prochaine_cycle:""}}; }});
-  const savePdca = (p) => { setPdca(p); try{_lsSet("gc-pdca",JSON.stringify(p));}catch (_) {} };
+  const savePdca = (p) => { setPdca(p); try{_lsSet("gc-pdca",JSON.stringify(p)); dsSave("gc-pdca",p).catch(()=>{});}catch (_) {} };
   const [mckinsey, setMckinsey] = useState(() => {
     try { return JSON.parse(_lsGet("gc-mckinsey")||"null") || Array.from({length:9},(_,i)=>({id:i,label:"",desc:"",stars:0})); } catch (_) { return Array.from({length:9},(_,i)=>({id:i,label:"",desc:"",stars:0})); }
   });
-  const saveMckinsey = (m) => { setMckinsey(m); try{_lsSet("gc-mckinsey",JSON.stringify(m));}catch (_) {} };
+  const saveMckinsey = (m) => { setMckinsey(m); try{_lsSet("gc-mckinsey",JSON.stringify(m)); dsSave("gc-mckinsey",m).catch(()=>{});}catch (_) {} };
   // -- 7S McKinsey ----------------------------------------------------------
   const [mc7s, setMc7s] = useState(() => {
     try { return JSON.parse(_lsGet("gc-mc7s")||"null") || {
@@ -898,56 +900,58 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
       staff:{score:0,notes:"",actions:""},
       skills:{score:0,notes:"",actions:""}}; } catch (_) { return {strategy:{score:0,notes:"",actions:""},structure:{score:0,notes:"",actions:""},systems:{score:0,notes:"",actions:""},shared_values:{score:0,notes:"",actions:""},style:{score:0,notes:"",actions:""},staff:{score:0,notes:"",actions:""},skills:{score:0,notes:"",actions:""}}; }
   });
-  const saveMc7s = (v) => { setMc7s(v); try{_lsSet("gc-mc7s",JSON.stringify(v));}catch (_) {} };
+  const saveMc7s = (v) => { setMc7s(v); try{_lsSet("gc-mc7s",JSON.stringify(v)); dsSave("gc-mc7s",v).catch(()=>{});}catch (_) {} };
   const [mc7sTab, setMc7sTab] = useState("grid"); // grid | 7s
   const [fiveM, setFiveM] = useState(() => { try { return JSON.parse(_lsGet("gc-5m")||"null") || {
     probleme:"", M1:[],M2:[],M3:[],M4:[],M5:[]
   }; } catch (_) { return {probleme:"",M1:[],M2:[],M3:[],M4:[],M5:[]}; }});
   const [fiveMInput, setFiveMInput] = useState({M1:"",M2:"",M3:"",M4:"",M5:""});
-  const saveFiveM = (m) => { setFiveM(m); try{_lsSet("gc-5m",JSON.stringify(m));}catch (_) {} };
+  const saveFiveM = (m) => { setFiveM(m); try{_lsSet("gc-5m",JSON.stringify(m)); dsSave("gc-5m",m).catch(()=>{});}catch (_) {} };
   const [fiveS, setFiveS] = useState(() => { try { return JSON.parse(_lsGet("gc-5s")||"null") || {
     S1:{score:0,notes:"",items:[]},S2:{score:0,notes:"",items:[]},S3:{score:0,notes:"",items:[]},S4:{score:0,notes:"",items:[]},S5:{score:0,notes:"",items:[]}
   }; } catch (_) { return {S1:{score:0,notes:"",items:[]},S2:{score:0,notes:"",items:[]},S3:{score:0,notes:"",items:[]},S4:{score:0,notes:"",items:[]},S5:{score:0,notes:"",items:[]}}; }});
-  const saveFiveS = (s) => { setFiveS(s); try{_lsSet("gc-5s",JSON.stringify(s));}catch (_) {} };
+  const saveFiveS = (s) => { setFiveS(s); try{_lsSet("gc-5s",JSON.stringify(s)); dsSave("gc-5s",s).catch(()=>{});}catch (_) {} };
   const [pca, setPca] = useState(() => { try { return JSON.parse(_lsGet("gc-pca")||"null") || {
     contexte:"",risques_majeurs:"",seuil_reprise:"",rto:"",rpo:"",equipe_crise:[],procedures:[]
   }; } catch (_) { return {contexte:"",risques_majeurs:"",seuil_reprise:"",rto:"",rpo:"",equipe_crise:[],procedures:[]}; }});
   const [pcaLoading, setPcaLoading] = useState(false);
-  const savePca = (p) => { setPca(p); try{_lsSet("gc-pca",JSON.stringify(p));}catch (_) {} };
+  const savePca = (p) => { setPca(p); try{_lsSet("gc-pca",JSON.stringify(p)); dsSave("gc-pca",p).catch(()=>{});}catch (_) {} };
 
   const [bcgItems, setBcgItems] = useState(() => { try { return JSON.parse(_lsGet("gc-bcg")||"null") || []; } catch (_) { return []; } });
   const [bcgForm, setBcgForm] = useState({nom:"",pdm:50,croissance:5,ca:0});
-  const saveBcg = (d) => { setBcgItems(d); try{_lsSet("gc-bcg",JSON.stringify(d));}catch (_) {} };
+  const saveBcg = (d) => { setBcgItems(d); try{_lsSet("gc-bcg",JSON.stringify(d)); dsSave("gc-bcg",d).catch(()=>{});}catch (_) {} };
 
   const [tenM, setTenM] = useState(() => { try { return JSON.parse(_lsGet("gc-10m")||"null") || {
     M1:{score:0,notes:""},M2:{score:0,notes:""},M3:{score:0,notes:""},M4:{score:0,notes:""},
     M5:{score:0,notes:""},M6:{score:0,notes:""},M7:{score:0,notes:""},M8:{score:0,notes:""},
     M9:{score:0,notes:""},M10:{score:0,notes:""}
   }; } catch (_) { return {M1:{score:0,notes:""},M2:{score:0,notes:""},M3:{score:0,notes:""},M4:{score:0,notes:""},M5:{score:0,notes:""},M6:{score:0,notes:""},M7:{score:0,notes:""},M8:{score:0,notes:""},M9:{score:0,notes:""},M10:{score:0,notes:""}}; }});
-  const saveTenM = (d) => { setTenM(d); try{_lsSet("gc-10m",JSON.stringify(d));}catch (_) {} };
+  const saveTenM = (d) => { setTenM(d); try{_lsSet("gc-10m",JSON.stringify(d)); dsSave("gc-10m",d).catch(()=>{});}catch (_) {} };
 
   const [resources, setResources] = useState(() => { try { return JSON.parse(_lsGet("gc-resources")||"null") || {
     humaines:[],materielles:[],immatterielles:[],financieres:[],technologiques:[]
   }; } catch (_) { return {humaines:[],materielles:[],immatterielles:[],financieres:[],technologiques:[]}; }});
   const [resTab, setResTab] = useState("humaines");
   const [resForm, setResForm] = useState({nom:"",valeur:"",note:0,criticalite:"MOYENNE",description:""});
-  const saveResources = (d) => { setResources(d); try{_lsSet("gc-resources",JSON.stringify(d));}catch (_) {} };
+  const saveResources = (d) => { setResources(d); try{_lsSet("gc-resources",JSON.stringify(d)); dsSave("gc-resources",d).catch(()=>{});}catch (_) {} };
 
   const [porter, setPorter] = useState(() => { try { return JSON.parse(_lsGet("gc-porter")||"null") || {
     F1:{score:3,notes:""},F2:{score:3,notes:""},F3:{score:3,notes:""},F4:{score:3,notes:""},F5:{score:3,notes:""}
   }; } catch (_) { return {F1:{score:3,notes:""},F2:{score:3,notes:""},F3:{score:3,notes:""},F4:{score:3,notes:""},F5:{score:3,notes:""}}; }});
-  const savePorter = (d) => { setPorter(d); try{_lsSet("gc-porter",JSON.stringify(d));}catch (_) {} };
+  const savePorter = (d) => { setPorter(d); try{_lsSet("gc-porter",JSON.stringify(d)); dsSave("gc-porter",d).catch(()=>{});}catch (_) {} };
 
   const [qqoqcp, setQqoqcp] = useState(() => { try { return JSON.parse(_lsGet("gc-qqoqcp")||"null") || {Q1:"",Q2:"",O:"",Q3:"",C:"",P:""}; } catch (_) { return {Q1:"",Q2:"",O:"",Q3:"",C:"",P:""}; }});
-  const saveQqoqcp = (d) => { setQqoqcp(d); try{_lsSet("gc-qqoqcp",JSON.stringify(d));}catch (_) {} };
+  const saveQqoqcp = (d) => { setQqoqcp(d); try{_lsSet("gc-qqoqcp",JSON.stringify(d)); dsSave("gc-qqoqcp",d).catch(()=>{});}catch (_) {} };
 
   const [vrio, setVrio] = useState(() => { try { return JSON.parse(_lsGet("gc-vrio")||"null") || []; } catch (_) { return []; } });
   const [vrioForm, setVrioForm] = useState({ressource:"",V:false,R:false,I:false,O:false});
-  const saveVrio = (d) => { setVrio(d); try{_lsSet("gc-vrio",JSON.stringify(d));}catch (_) {} };
+  const saveVrio = (d) => { setVrio(d); try{_lsSet("gc-vrio",JSON.stringify(d)); dsSave("gc-vrio",d).catch(()=>{});}catch (_) {} };
 
   const [paretoItems, setParetoItems] = useState(() => { try { return JSON.parse(_lsGet("gc-pareto")||"null") || []; } catch (_) { return []; } });
   const [paretoForm, setParetoForm] = useState({cause:"",freq:0});
-  const savePareto = (d) => { setParetoItems(d); try{_lsSet("gc-pareto",JSON.stringify(d));}catch (_) {} };
+  const savePareto = (d) => { setParetoItems(d); try{_lsSet("gc-pareto",JSON.stringify(d)); dsSave("gc-pareto",d).catch(()=>{});}catch (_) {} };
+
+  useRemoteSync({'gc-pdca': setPdca, 'gc-mckinsey': setMckinsey, 'gc-mc7s': setMc7s, 'gc-5m': setFiveM, 'gc-5s': setFiveS, 'gc-pca': setPca, 'gc-bcg': setBcgItems, 'gc-10m': setTenM, 'gc-resources': setResources, 'gc-porter': setPorter, 'gc-qqoqcp': setQqoqcp, 'gc-vrio': setVrio, 'gc-pareto': setParetoItems});
 
   const exportSwot = () => {
     const txt=`ANALYSE SWOT — GÉNIE CONSULTANT\n${new Date().toLocaleDateString("fr-FR")}\n\nFORCES (S)\n${swot.S}\n\nFAIBLESSES (W)\n${swot.W}\n\nOPPORTUNITÉS (O)\n${swot.O}\n\nMENACES (T)\n${swot.T}`;

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // LogistiqueApp.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, playSound, formatCFA, dsSave, dsDeleteItemFromArray } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { INITIAL_ACHATS, INITIAL_STOCKS } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
@@ -40,7 +41,7 @@ export function LogistiqueModule({ T, currentUser, users=[], setNotifications=_n
   const saveStocks = v => {
     setStocks(prev => {
       const resolved = typeof v === 'function' ? v(prev) : v;
-      if(!isDemoMode) try { _lsSet("gc-logmod-stocks", JSON.stringify(resolved)); } catch (_) {}
+      if(!isDemoMode) try { _lsSet("gc-logmod-stocks", JSON.stringify(resolved)); dsSave('gc-logmod-stocks', resolved).catch(err => gcToast.syncError('', err)); } catch (_) {}
       return resolved;
     });
   };
@@ -55,13 +56,15 @@ export function LogistiqueModule({ T, currentUser, users=[], setNotifications=_n
   const [inventaires, setInventaires] = useState(()=>{try{return JSON.parse(_lsGet("gc-inventaires")||"[]");}catch(_){return [];}});
   const saveInventaires = v=>{setInventaires(v);try{_lsSet("gc-inventaires",JSON.stringify(v)); dsSave("gc-inventaires",v).catch(err => gcToast.syncError('', err));}catch(_){}};
   const [inventaireEnCours, setInventaireEnCours] = useState(()=>{try{return JSON.parse(_lsGet("gc-inventaire-en-cours")||"null");}catch(_){return null;}});
-  const saveInventaireEnCours = v=>{setInventaireEnCours(v);try{_lsSet("gc-inventaire-en-cours",v?JSON.stringify(v):"null");}catch(_){}};
+  const saveInventaireEnCours = v=>{setInventaireEnCours(v);try{_lsSet("gc-inventaire-en-cours",v?JSON.stringify(v):"null"); dsSave("gc-inventaire-en-cours",v||null).catch(()=>{});}catch(_){}};
   // ── État hoissé pour tab actifs (ex-IIFE — Rules of Hooks) ──────────────
   const [actifs, setActifs] = useState(()=>{try{return JSON.parse(_lsGet("gc-logistique-actifs")||"[]");}catch(_){return [];}});
   const [showActifForm, setShowActifForm] = useState(false);
   const [actifForm, setActifForm] = useState({nom:"",categorie:"INFORMATIQUE",marque:"",modele:"",serie:"",valeur:"",dateAchat:"",affectation:"",etat:"BON",localisation:"Siège",notes:""});
   const [editActif, setEditActif] = useState(null);
   const saveActifs = v=>{setActifs(v);try{_lsSet("gc-logistique-actifs",JSON.stringify(v)); dsSave("gc-logistique-actifs",v).catch(err => gcToast.syncError('', err));}catch(_){}};
+
+  useRemoteSync({'gc-achats': setAchats, 'gc-logmod-stocks': setStocks, 'gc-inventaires': setInventaires, 'gc-logistique-actifs': setActifs});
 
   // ── État hoissé pour tab inventaires (ex-IIFE — Rules of Hooks) ──────────
   const [invActifs, setInvActifsState] = useState(()=>{try{return JSON.parse(_lsGet("gc-logistique-actifs")||"[]");}catch(_){return [];}});
