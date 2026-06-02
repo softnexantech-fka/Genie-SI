@@ -219,7 +219,7 @@ function CollabModal({ T, dossier, users, localUser, partners, handleSaveCollabs
 }
 
 // ── UploadModal — DOIT être hors DossiersList pour éviter re-mount à chaque render ──
-function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploadForm, fileUploadStatus, setFileUploadStatus, uploadRef, handleFileSelect, handleSaveUpload, handleDownloadFile, saveDossierFiles, setShowUploadModal, gcDocIcon, formatDate }) {
+function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploadForm, fileUploadStatus, setFileUploadStatus, uploadRef, handleFileSelect, handleSaveUpload, handleDownloadFile, handleViewFile, handleDeleteFile, saveDossierFiles, setShowUploadModal, gcDocIcon, formatDate }) {
   const thisDossierFiles = (dossierFiles||[]).filter(f=>f.dossierId===dossier.id);
   return (
     <Modal title={`📎 Fichiers — ${dossier.ref}`} onClose={()=>setShowUploadModal(null)} T={T} wide>
@@ -235,12 +235,15 @@ function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploa
                 {f.description&&<div style={{color:T.textMuted,fontSize:10,fontStyle:"italic"}}>{f.description}</div>}
               </div>
               {(f.accessLevel<=localUser.level||(localUser?.isAdmin || localUser?.level >= 6))?(
-                <button onClick={()=>handleDownloadFile(f)} style={{background:"#3B82F622",border:"1px solid #3B82F644",borderRadius:6,padding:"4px 10px",color:"#3B82F6",cursor:"pointer",fontSize:11}}>⬇ {f.downloads>0?`(${f.downloads})`:""}</button>
+                <div style={{display:"flex",gap:4}}>
+                  <button onClick={()=>handleViewFile(f)} title="Voir / Ouvrir" style={{background:"#A855F722",border:"1px solid #A855F744",borderRadius:6,padding:"4px 8px",color:"#A855F7",cursor:"pointer",fontSize:11}}>👁️</button>
+                  <button onClick={()=>handleDownloadFile(f)} title="Télécharger" style={{background:"#3B82F622",border:"1px solid #3B82F644",borderRadius:6,padding:"4px 10px",color:"#3B82F6",cursor:"pointer",fontSize:11}}>⬇ {f.downloads>0?`(${f.downloads})`:""}</button>
+                </div>
               ):(
                 <span style={{color:"#EF4444",fontSize:10,padding:"4px 8px"}}>🔒 Niv.{f.accessLevel}+</span>
               )}
               {(f.uploadedBy===localUser.id||localUser.level>=4||(localUser?.isAdmin || localUser?.level >= 6))&&(
-                <button onClick={()=>saveDossierFiles(prev=>prev.filter(x=>x.id!==f.id))} style={{background:"#EF444415",border:"1px solid #EF444444",borderRadius:6,padding:"4px 8px",color:"#EF4444",cursor:"pointer",fontSize:11}}>🗑️</button>
+                <button onClick={()=>handleDeleteFile(f)} style={{background:"#EF444415",border:"1px solid #EF444444",borderRadius:6,padding:"4px 8px",color:"#EF4444",cursor:"pointer",fontSize:11}}>🗑️</button>
               )}
             </div>
           ))}
@@ -724,6 +727,15 @@ export const DossiersList = React.memo(function DossiersList() {
     playSound("success");
   };
 
+  // Ouvrir/visualiser un fichier pièce-jointe
+  const handleViewFile = (f) => { openDocFile(f); };
+
+  // Supprimer une pièce jointe en local + backend + sync réseau
+  const handleDeleteFile = async (f) => {
+    await dsDeleteItemFromArray('gc-dossier-files', f.id);
+    saveDossierFiles(prev => prev.filter(x => x.id !== f.id));
+  };
+
   // FIX v152 — handleDownloadFile : priorité serverUrl, fallback dataUrl
   const handleDownloadFile = async (f) => {
     if (f.accessLevel > localUser.level && !(localUser?.isAdmin || localUser?.level >= 6) && !isMG) {
@@ -923,9 +935,7 @@ export const DossiersList = React.memo(function DossiersList() {
 
   const handleDocDownload = (doc) => {
     if ((doc.accessLevel||1) > localUser.level && !(localUser?.isAdmin || localUser?.level >= 6)) { gcAlert(`🔒 Accès refusé — Habilitation Niv.${doc.accessLevel} requise.`); return; }
-    const src = doc.fileData || doc.dataUrl;
-    if (!src) { gcAlert("Aucun fichier joint à ce document."); return; }
-    const a = document.createElement("a"); a.href=src; a.download=doc.fileName||doc.name||doc.titre||"document"; a.click();
+    gcDownloadDoc({ id: doc.id, serverUrl: doc.serverUrl, serverId: doc.serverId, url: doc.url, dataUrl: doc.fileData || doc.dataUrl, nom: doc.fileName||doc.name||doc.titre, name: doc.fileName||doc.name||doc.titre });
     if (doc._src === "standalone") saveStandaloneDocs(prev=>prev.map(x=>x.id===doc.id?{...x,downloads:(x.downloads||0)+1}:x));
     else saveDossierFiles(prev=>prev.map(x=>x.id===doc.id?{...x,downloads:(x.downloads||0)+1}:x));
   };
@@ -1336,8 +1346,8 @@ export const DossiersList = React.memo(function DossiersList() {
         fileUploadStatus={fileUploadStatus} setFileUploadStatus={setFileUploadStatus}
         uploadRef={uploadRef}
         handleFileSelect={handleFileSelect} handleSaveUpload={handleSaveUpload}
-        handleDownloadFile={handleDownloadFile} saveDossierFiles={saveDossierFiles}
-        setShowUploadModal={setShowUploadModal}
+        handleDownloadFile={handleDownloadFile} handleViewFile={handleViewFile} handleDeleteFile={handleDeleteFile}
+        saveDossierFiles={saveDossierFiles} setShowUploadModal={setShowUploadModal}
         gcDocIcon={gcDocIcon} formatDate={formatDate}
       />}
 
@@ -1887,9 +1897,9 @@ export const DossiersList = React.memo(function DossiersList() {
             )}
             {filteredDocs.map(doc=>{
               const isLocked = (doc.accessLevel||1) > localUser.level && !(localUser?.isAdmin || localUser?.level >= 6);
-              // FIX v86: normalize data source — dossierFiles use dataUrl, standalone use fileData
+              // hasFile: vrai si le fichier est accessible localement OU sur le serveur
               const fileSrc = doc.fileData || doc.dataUrl;
-              const hasFile = !!fileSrc;
+              const hasFile = !!(fileSrc || doc.serverUrl || doc.serverId);
               const isStandalone = doc._src === "standalone";
               const isSubmittedToMe = doc.submitTo === localUser.id;
               const isArchived = (doc.status||"ACTIF") === "ARCHIVE";
