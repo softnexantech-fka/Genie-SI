@@ -179,7 +179,7 @@ export function ConformiteFull({ T, currentUser, users=[], setNotifications=_noo
     {id:"qualite",label:"Qualité",icon:"🏆",color:"#EC4899",items:["Cartographie des processus documentée","Manuel qualité à jour","Indicateurs de performance définis","Revues de direction réalisées","Non-conformités traitées"]},
   ];
   const [checks, setChecks] = useState(() => { try { return JSON.parse(_lsGet("gc-conffull-checks")||"{}"); } catch (_) { return {}; }});
-  const toggle = (domain, item) => { const k=`${domain}::${item}`; const nc={...checks,[k]:!checks[k]}; setChecks(nc); if(!isDemoMode) try{_lsSet("gc-conffull-checks",JSON.stringify(nc));}catch (_) {} };
+  const toggle = (domain, item) => { const k=`${domain}::${item}`; const nc={...checks,[k]:!checks[k]}; setChecks(nc); if(!isDemoMode) try{_lsSet("gc-conffull-checks",JSON.stringify(nc)); dsSave("gc-conffull-checks",nc).catch(()=>{});}catch (_) {} };
   const score = (domain) => { const its=DOMAINES_CHECK.find(d=>d.id===domain)?.items||[]; const done=its.filter(i=>checks[domain+"::"+i]).length; return {done,total:its.length,pct:Math.round(done/its.length*100)}; };
   const totalScore = () => { const all=DOMAINES_CHECK.flatMap(d=>d.items.map(i=>checks[d.id+"::"+i])); return Math.round(all.filter(Boolean).length/all.length*100); };
 

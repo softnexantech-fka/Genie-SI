@@ -337,6 +337,7 @@ export function SIRHModule({ T, currentUser, users=[], setUsers=_noop, setNotifi
     'gc-sirh-leaves':        setLeaves,
     'gc-sirh-recrutements':  setRecrutements,
     'gc-sirh-evaluations':   setEvaluations,
+    'gc-sirh-fichiers':      setFichiers,
   });
 
   const TABS = [
@@ -2185,7 +2186,7 @@ export function BaseFichiersRH({ T, currentUser, users=[], isDemoMode=false }) {
     {v:"AUTRE",l:"📎 Autre",c:"#6B7280"},
   ];
 
-  const saveFichiers = (f) => { setFichiers(f); if(!isDemoMode) try { _lsSet("gc-sirh-fichiers", JSON.stringify(f)); } catch (_) {} };
+  const saveFichiers = (f) => { setFichiers(f); if(!isDemoMode) try { _lsSet("gc-sirh-fichiers", JSON.stringify(f)); dsSave("gc-sirh-fichiers",f).catch(()=>{}); } catch (_) {} };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];

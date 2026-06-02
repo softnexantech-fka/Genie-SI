@@ -105,8 +105,8 @@ export function AuditApp({ T, currentUser, setNotifications=_noop, setTaches=_no
   const [showOrgigramNodeForm, setShowOrgigramNodeForm] = React.useState(false);
   const [orgigramLinkForm, setOrgigramLinkForm] = React.useState({from:"",to:"",type:"hierarchique"});
   const [showOrgigramLinkForm, setShowOrgigramLinkForm] = React.useState(false);
-  const saveOrgigramNodes = v=>{setOrgigramNodes(v);try{_lsSet("gc-orgigram-nodes",JSON.stringify(v));}catch(_){}};
-  const saveOrgigramLinks = v=>{setOrgigramLinks(v);try{_lsSet("gc-orgigram-links",JSON.stringify(v));}catch(_){}};
+  const saveOrgigramNodes = v=>{setOrgigramNodes(v);try{_lsSet("gc-orgigram-nodes",JSON.stringify(v)); dsSave("gc-orgigram-nodes",v).catch(()=>{});}catch(_){}};
+  const saveOrgigramLinks = v=>{setOrgigramLinks(v);try{_lsSet("gc-orgigram-links",JSON.stringify(v)); dsSave("gc-orgigram-links",v).catch(()=>{});}catch(_){}};
 
   // ── État hoissé : grille_taches enrichie ─────────────────────────────────
   const [gTacheEditId, setGTacheEditId] = React.useState(null);
@@ -128,6 +128,8 @@ export function AuditApp({ T, currentUser, setNotifications=_noop, setTaches=_no
     'gc-coso-scores':            setCosoScores,
     'gc-coso-custom-q':          setCosoCustomQ,
     'gc-coso-notes':             setCosoNotes,
+    'gc-orgigram-nodes':         setOrgigramNodes,
+    'gc-orgigram-links':         setOrgigramLinks,
   });
 
   const addTpaMission = () => {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // ArchivagePanel.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, playSound, formatDate, _activeUser, formatDateTime, getProcColor, ALPHA_SEQ , dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { INITIAL_ARCHIVES, CODES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
@@ -22,14 +23,7 @@ export function ArchivagePanel({ dossiers=[], T, localUser, users=[], setNotific
   const fileInputRef = useRef(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [archives, setArchives] = useState(() => { try { const saved=JSON.parse(_lsGet("gc-archives")||"null"); return saved&&saved.length>0?saved:INITIAL_ARCHIVES; } catch (_) { return INITIAL_ARCHIVES; } });
-  // FIX v86 — Reload from LS on mount so archives written from DossiersList are visible
-  useEffect(() => {
-    try { const saved=JSON.parse(_lsGet("gc-archives")||"null"); if(saved&&saved.length>0) setArchives(saved); } catch(_) {}
-    // Also listen to storage events from other tabs
-    const handler = (e) => { if(e.key==="gc-archives"&&e.newValue){ try { setArchives(JSON.parse(e.newValue)); } catch(_) {} } };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }, []);
+  useRemoteSync({'gc-archives': setArchives});
   // Lecture archives docs depuis GestionDocsUnifiee (gc-docs-archives)
   const [docArchives] = useState(() => { try { return JSON.parse(_lsGet("gc-docs-archives")||"[]"); } catch (_) { return []; }});
   const [archiveTab, setArchiveTab] = useState("mes_archives");

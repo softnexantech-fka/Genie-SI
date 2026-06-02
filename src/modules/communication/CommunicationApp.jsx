@@ -32,8 +32,10 @@ export function CommunicationApp({ T, currentUser, setNotifications=_noop }){
 
   // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
   useRemoteSync({
-    'gc-comm-campagnes': setCampagnes,
-    'gc-comm-contacts':  setContacts,
+    'gc-comm-campagnes':    setCampagnes,
+    'gc-comm-contacts':     setContacts,
+    'gc-comm-fiches':       setFiches,
+    'gc-comm-custom-tpl':   setCustomTemplates,
   });
 
   // FIX v153 — saveData utilise dsSave pour la synchronisation cross-machine
@@ -120,13 +122,13 @@ export function CommunicationApp({ T, currentUser, setNotifications=_noop }){
 
   // ── État fiches prospection ─────────────────────────────────────────────
   const [fiches, setFiches] = useState(()=>{try{return JSON.parse(_lsGet("gc-comm-fiches")||"[]");}catch(_){return [];}});
-  const saveFiches = f=>{setFiches(f);try{_lsSet("gc-comm-fiches",JSON.stringify(f));}catch(_){}};
+  const saveFiches = f=>{setFiches(f);try{_lsSet("gc-comm-fiches",JSON.stringify(f)); dsSave("gc-comm-fiches",f).catch(()=>{});}catch(_){}};
   const [ficheForm, setFicheForm] = useState({prospect:"",secteur:"",contact:"",telephone:"",email:"",besoins:"",offre:"",priorite:"NORMALE",statut:"NOUVEAU",notes:"",dateRelance:""});
   const [editFiche, setEditFiche] = useState(null);
   const [showFicheForm, setShowFicheForm] = useState(false);
   // ── État modèles personnalisés ─────────────────────────────────────────
   const [customTemplates, setCustomTemplates] = useState(()=>{try{return JSON.parse(_lsGet("gc-comm-custom-tpl")||"[]");}catch(_){return [];}});
-  const saveTemplates = t=>{setCustomTemplates(t);try{_lsSet("gc-comm-custom-tpl",JSON.stringify(t));}catch(_){}};
+  const saveTemplates = t=>{setCustomTemplates(t);try{_lsSet("gc-comm-custom-tpl",JSON.stringify(t)); dsSave("gc-comm-custom-tpl",t).catch(()=>{});}catch(_){}};
   const [tplForm, setTplForm] = useState({titre:"",type:"OFFRE",canal:"EMAIL",sujet:"",corps:"",tags:""});
   const [showTplForm, setShowTplForm] = useState(false);
   const [editTpl, setEditTpl] = useState(null);

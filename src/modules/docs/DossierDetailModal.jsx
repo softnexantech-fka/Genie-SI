@@ -263,7 +263,7 @@ export function DossierDetailModal({ dossier, setSelectedDossier=_noop, T, local
             {/* ── Visionneuse image inline ── */}
             {fileViewerIdx !== null && thisDossierFiles[fileViewerIdx] && (() => {
               const f = thisDossierFiles[fileViewerIdx];
-              const src = f.dataUrl || f.fileData;
+              const src = f.serverUrl || f.dataUrl || f.fileData;
               return (
                 <div style={{background:"#000e",borderRadius:10,marginBottom:10,position:"relative",textAlign:"center",padding:"8px 0"}}>
                   <img src={src} alt={f.name} style={{maxWidth:"100%",maxHeight:320,objectFit:"contain",borderRadius:8}} />

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // TableurPro.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, _gcSafeCalc } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, _gcSafeCalc, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 
 export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=null }){
@@ -74,9 +75,14 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
   const inputRef = React.useRef(null);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+  useRemoteSync({'gc-tableur-pro': setSheets});
   const saveSheets = (s) => {
     setSheets(s);
-    try{_lsSet("gc-tableur-pro",JSON.stringify(s.map(sh=>({...sh,data:sh.data.map(row=>row.map(c=>c.v||c.formula||c.bold||c.italic||c.bg||c.color||c.fmt?c:{v:""}))}))));}catch(_){}
+    try{
+      const trimmed = s.map(sh=>({...sh,data:sh.data.map(row=>row.map(c=>c.v||c.formula||c.bold||c.italic||c.bg||c.color||c.fmt?c:{v:""}))}));
+      _lsSet("gc-tableur-pro",JSON.stringify(trimmed));
+      dsSave("gc-tableur-pro",trimmed).catch(()=>{});
+    }catch(_){}
   };
   const pushUndo = (snapshot) => {
     setUndoStack(u=>[...u.slice(-29),snapshot]);

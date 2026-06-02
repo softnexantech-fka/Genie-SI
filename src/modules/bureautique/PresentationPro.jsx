@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // PresentationPro.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 
 export function PresentationApp({ T, currentUser, setNotifications=_noop }){
@@ -71,7 +72,8 @@ export function PresentationApp({ T, currentUser, setNotifications=_noop }){
   const timerRef = React.useRef(null);
   const presRef = React.useRef(null);
 
-  const saveDecks = (d) => { setDecks(d); try{_lsSet("gc-pres-decks-v2",JSON.stringify(d));}catch(_){} };
+  useRemoteSync({'gc-pres-decks-v2': setDecks});
+  const saveDecks = (d) => { setDecks(d); try{_lsSet("gc-pres-decks-v2",JSON.stringify(d)); dsSave("gc-pres-decks-v2",d).catch(()=>{});}catch(_){} };
   const deck = decks.find(d=>d.id===activeDeck);
   const slides = deck?.slides||[];
   const slide = slides[activeSlide];
