@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // GestionDocsUnifiee.jsx — SI Génie Consultant v129
-import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, useSI, gcFileSave, _activeUser, gcAICall, dsSave, dsMarkDeleted, dsDeleteItemFromArray } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, useSI, gcFileSave, _activeUser, gcAICall, dsSave, dsMarkDeleted, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { GC_DOCS_REQUIS, CRM_SEGMENTS_C, CRM_SECTEURS_C, CRM_SOURCES_C, CRM_TYPES_INTERACTION_C, CRM_TYPES_RELANCE_C, CRM_ETAPES_C, CRM_RISKS_C, CRM_KYC_C, CRM_STATUTS_C, CRM_PROCS_METIER_C, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { AIAssistant } from '../../components/AIAssistant.jsx';
@@ -289,6 +290,14 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   // KYC — synchro avec gc-jur-kyc (JuridiqueApp)
   const [kycData, setKycDataRaw] = useState(()=>{try{return JSON.parse(_lsGet("gc-jur-kyc")||"[]");}catch(_){return [];}});
   const saveKycData = React.useCallback(v => { setKycDataRaw(v); try{_lsSet("gc-jur-kyc",JSON.stringify(v)); dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err));}catch(_){} dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err)); }, []);
+
+  // Sync temps-réel : rafraîchit les données CRM quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-crm-interactions': setInteractionsRaw,
+    'gc-crm-opps':         setOppsRaw,
+    'gc-crm-relances':     setRelancesRaw,
+    'gc-jur-kyc':          setKycDataRaw,
+  });
 
   // ── CRM — États UI ───────────────────────────────────────────────────────
   const [crmTab, setCrmTab] = useState("portefeuille");

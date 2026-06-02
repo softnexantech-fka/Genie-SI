@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { _lsGet, _lsSet, playSound, dsSave } from '../core/index.js';
+import { _lsGet, _lsSet, playSound, dsSave, dsGet } from '../core/index.js';
+import { useRemoteSync } from '../hooks/useSyncedState.js';
 
 // ClockButton — Bouton d'horloge indépendant dans la barre supérieure
 // Affiche: Heure actuelle + badge d'état (minuteur, chrono, alarmes)
@@ -39,6 +40,9 @@ export function ClockButton({ T, setNotifications = () => {} }) {
   const [wAlarmRepeat, setWAlarmRepeat] = useState("once");
   const [wAlarmRinging, setWAlarmRinging] = useState(null);
   const [wTimerToastVisible, setWTimerToastVisible] = useState(false);
+
+  // Sync: alarmes créées depuis AgendaModule sur un autre poste
+  useRemoteSync({ 'gc-widget-alarms': setWAlarms });
 
   const ref = useRef(null);
 

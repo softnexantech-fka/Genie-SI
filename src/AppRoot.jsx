@@ -434,6 +434,7 @@ export default function App() {
           { key: 'gc-comm-contacts',         setters: [(v) => { try { _lsSet('gc-comm-contacts', JSON.stringify(v)); } catch (_) {} }],         fallback: [] },
           { key: 'gc-comm-fiches',           setters: [(v) => { try { _lsSet('gc-comm-fiches', JSON.stringify(v)); } catch (_) {} }],           fallback: [] },
           { key: 'gc-comm-custom-tpl',       setters: [(v) => { try { _lsSet('gc-comm-custom-tpl', JSON.stringify(v)); } catch (_) {} }],       fallback: [] },
+          { key: 'gc-widget-alarms',         setters: [(v) => { try { _lsSet('gc-widget-alarms', JSON.stringify(v)); } catch (_) {} }],         fallback: [] },
 
           // ── FIX vNext T06 : Audit COSO/PCA ────────────────────────────────────────
           { key: 'gc-tpa',                   setters: [(v) => { try { _lsSet('gc-tpa', JSON.stringify(v)); } catch (_) {} }],                   fallback: [] },
@@ -907,6 +908,12 @@ export default function App() {
                 window.dispatchEvent(new CustomEvent('gc:sync-process-config', { detail: val }));
               }
             }, {});
+            break;
+          }
+          case 'gc-widget-alarms': {
+            refreshServerValue('gc-widget-alarms', (val) => {
+              try { _lsSet('gc-widget-alarms', JSON.stringify(val)); } catch (_) {}
+            }, []);
             break;
           }
           // FIX v129 — Actions comptes (suspensions, réactivations, créations par DG/Admin)

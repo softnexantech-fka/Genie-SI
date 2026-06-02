@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // CommunicationApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, dsSave, dsDeleteItemFromArray } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, dsSave, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 
 export function CommunicationApp({ T, currentUser, setNotifications=_noop }){
@@ -28,6 +29,12 @@ export function CommunicationApp({ T, currentUser, setNotifications=_noop }){
   const [showNewCont, setShowNewCont] = useState(false);
   const [aiGen, setAiGen] = useState({ loading:false, result:"", type:"" });
   const [customMsg, setCustomMsg] = useState({ sujet:"", corps:"", dest:"" });
+
+  // Sync temps-réel : rafraîchit les données quand un autre utilisateur les modifie
+  useRemoteSync({
+    'gc-comm-campagnes': setCampagnes,
+    'gc-comm-contacts':  setContacts,
+  });
 
   // FIX v153 — saveData utilise dsSave pour la synchronisation cross-machine
   const saveData = (key, data) => {

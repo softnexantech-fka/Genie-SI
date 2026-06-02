@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // AgendaModule.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, formatDate, _activeUser, getUser , dsSave } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, formatDate, _activeUser, getUser , dsSave, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
 
