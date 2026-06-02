@@ -5,7 +5,7 @@ import { FileUploader, SingleFileUploader } from '../../components/FileUploader.
 import { _lsSet, _lsRm, _lsGet, _noop, playSound, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, gcFileSave, _activeUser, gcViewDoc, getProcColor, gcHashPassword, gcReadFile, gcFmtSize, gcDownloadDoc, dsSave } from '../../core/index.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { STATUS_CONFIG, DOC_CATEGORIES, ACCOUNT_STATUS_CONFIG, CODES, getCatInfo } from '../../core/constants.js'; // FIX v132 — getCatInfo importée
-import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge, ProgressBar} from '../../components/UI.jsx';
+import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge, ProgressBar, UserAvatar} from '../../components/UI.jsx';
 import { AIConfigAdminTab } from '../../components/AIAssistant.jsx';
 import { ActivityJournal, FileDataManager, PrinterConfig } from './InformationsPanel.jsx';
 import { AdminConnexionsTab } from './GestionComptesPanel.jsx';
@@ -631,7 +631,7 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
               const acCfg = ACCOUNT_STATUS_CONFIG[acStatus] || ACCOUNT_STATUS_CONFIG.ACTIF;
               return (
               <div key={u.id} style={{ background: T.surface2, borderRadius: 8, border: `1px solid ${acStatus!=="ACTIF"?acCfg.color+"44":T.border}`, padding: "10px 14px", marginBottom: 6, display: "flex", gap: 10, alignItems: "center" }}>
-                <div style={{ width: 32, height: 32, borderRadius: "50%", background: u.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", fontWeight: 700, opacity: acStatus!=="ACTIF"?0.6:1 }}>{u.avatar}</div>
+                <UserAvatar user={u} size={32} style={{opacity: acStatus!=="ACTIF"?0.6:1}} />
                 <div style={{ flex: 1 }}>
                   <div style={{ color: T.text, fontWeight: 700, fontSize: 12, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
                     {u.name}
@@ -983,7 +983,7 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
               return (
                 <div key={u.id} style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: u.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff", fontWeight: 700 }}>{u.avatar}</div>
+                    <UserAvatar user={u} size={28} />
                     <div style={{ flex: 1 }}><div style={{ color: T.text, fontWeight: 700, fontSize: 12 }}>{u.name}</div><div style={{ color: T.textMuted, fontSize: 10 }}>{u.role} • {userDossiers.length} dossier(s)</div></div>
                   </div>
                   {userDossiers.slice(0, 3).map(d => {

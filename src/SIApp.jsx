@@ -8,7 +8,7 @@ import {
   _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, _tDone, _tActive, gcPushNotif, playSound, gcGetSoundSettings, gcSetSoundSettings, formatCFA, gcCalcPaie, gcCalcIRPP, gcLoadFiscalConfig, gcFindApprover, gcCodif, gcCodifDOC, gcCodifTCHE, gcCodifMSG, _gcSafeCalc, formatDate, gcGetDelaiConfig, gcAntiRedondance, gcAIBuildSystemPrompt, gcAILoadConfig, gcAISaveConfig, GC_AI_PROXY_URL, gcCopy, generateAccessCode, SICtx, SIErrorBoundary, LiveClock, _activeUser, getProcColor, useSessionTimeout, dsSave, dsOnSync, daysLeft
 } from './core/index.js'; // FIX v127 — imports inutilisés retirés
 import { THEMES, STATUS_CONFIG, PRIORITY_CONFIG, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_ARCHIVES, INITIAL_MESSAGES, INITIAL_USERS, INITIAL_COMMITTEES, INITIAL_CODIF_REGISTRY, INITIAL_INTERNAL_DOCS, INITIAL_SI_SYSTEM_DOCS, GC_SUBPROC_MAP, GC_ALL_SUBPROCS, GC_APPROVAL_ROUTING, GC_CIRCUITS_INIT, GC_DOCS_REQUIS, GC_ACTIVITES, GC_DELAI_DEFAULT, GC_AI_CONFIG_KEY, GC_AI_CONFIG_DEFAULT, GC_AI_LEVEL_RULES, PROCESS_ACTIVITIES, DOC_CATEGORIES, USER_FUNCTIONS, PROCESS_APP_MATRIX_DEFAULT, CRM_SEGMENTS_C, CRM_SECTEURS_C, CRM_SOURCES_C, CRM_TYPES_INTERACTION_C, CRM_TYPES_RELANCE_C, CRM_ETAPES_C, CRM_RISKS_C, CRM_KYC_C, CRM_STATUTS_C, CRM_PROCS_METIER_C, PLAN_COMPTABLE_OHADA, GC_ADMIN_HASH, GC_DG_HASH, ALL_NATIONALITIES, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, DEMO_PENDING, DEMO_ARCHIVES, DEMO_CODIF_REGISTRY, DEMO_INTERNAL_DOCS, FILE_TYPE_CONFIG, INITIAL_SIRH_PRESENCES, INITIAL_SIRH_LEAVES, INITIAL_RECRUTEMENTS, INITIAL_SYSTEM_MSGS, CODES, INITIAL_OBLIGATIONS, INITIAL_STOCKS} from './core/constants.js';
-import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Badge, ProgressBar, Tabs, NationaliteField, SmartBanner, RotatingAlert } from './components/UI.jsx';
+import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Badge, ProgressBar, Tabs, NationaliteField, SmartBanner, RotatingAlert, UserAvatar } from './components/UI.jsx';
 import { GlobalStyles } from './styles/GlobalStyles.jsx';
 import { AIAssistant } from './components/AIAssistant.jsx';
 import { ToolsWidget } from './components/ToolsWidget.jsx';
@@ -1595,7 +1595,7 @@ export function SIApp(props) {
           return (
             <div key={u.id} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 1fr 1fr 2fr", padding: "10px 14px", borderBottom: `1px solid ${T.border}20`, alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: "50%", background: u.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff", fontWeight: 700, flexShrink: 0 }}>{u.avatar}</div>
+                <UserAvatar user={u} size={28} />
                 <div>
                   <div style={{ color: T.text, fontSize: 11, fontWeight: 600 }}>{u.name}</div>
                   <div style={{ color: T.textDim, fontSize: 9 }}>{u.id}</div>
@@ -1803,9 +1803,7 @@ export function SIApp(props) {
         </nav>
         <div style={{ padding: 8, borderTop: `1px solid ${T.border}` }}>
           <div onClick={() => setShowProfile(true)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 8px", background: T.surface2, borderRadius: 8, cursor: "pointer" }}>
-            <div style={{ width: 26, height: 26, borderRadius: "50%", background: localUser.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff", fontWeight: 700, flexShrink: 0, overflow: "hidden", border: "1px solid " + T.border }}>
-              {localUser.photoUrl ? <img src={localUser.photoUrl} alt="avatar" style={{ width:"100%",height:"100%",objectFit:"cover" }} /> : localUser.avatar}
-            </div>
+            <UserAvatar user={localUser} size={26} style={{ border: "1px solid " + T.border }} />
             {sidebarOpen && (
               <>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1942,10 +1940,12 @@ export function SIApp(props) {
             <NotificationCenter notifications={notifications} setNotifications={setNotifications} T={T} onNavigate={setActiveModule} />
             {/* Avatar avec dropdown */}
             <div style={{ position: "relative" }}>
-              <div
+              <UserAvatar
+                user={localUser}
+                size={32}
                 onClick={(e) => { e.stopPropagation(); setShowProfileDropdown(p => !p); }}
-                style={{ width: 32, height: 32, borderRadius: "50%", background: localUser.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff", fontWeight: 700, cursor: "pointer", border: showProfileDropdown ? "2px solid #C41E3A" : "2px solid transparent", transition: "border 0.2s", overflow: "hidden" }}
-              >{localUser.photoUrl ? <img src={localUser.photoUrl} alt="avatar" style={{ width:"100%",height:"100%",objectFit:"cover" }} /> : localUser.avatar}</div>
+                style={{ border: showProfileDropdown ? "2px solid #C41E3A" : "2px solid transparent", transition: "border 0.2s", cursor: "pointer" }}
+              />
               {showProfileDropdown && (
                 <ProfileDropdown
                   currentUser={localUser}

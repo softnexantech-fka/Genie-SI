@@ -4,6 +4,7 @@ import { useDialog } from '../components/Dialog.jsx';
 // SI Génie Consultant v127
 import { _lsGet, _lsSet, _tActive, playSound, gcHashPassword, gcGetCabinetInfo } from '../core/index.js';
 import { ALL_NATIONALITIES, NATIONALITIES_CEMAC, NATIONALITIES_CEDEAO, NATIONALITIES_AUTRES } from '../core/constants.js';
+import { gcUserInitials, gcUserColor } from '../core/helpers.js';
 
  
 export function NationaliteField({ value, onChange, T, noLabel=false }){
@@ -672,3 +673,30 @@ export const RotatingAlert = React.memo(function RotatingAlert({ alerts, setActi
 
 // ══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * UserAvatar — cercle avec photo ou initiales colorées selon le niveau.
+ * Props : user (objet user), size (px, défaut 32), style (overrides)
+ */
+export function UserAvatar({ user, size = 32, style: s = {}, onClick }) {
+  if (!user) return null;
+  const initials = user.avatar || gcUserInitials(user.name);
+  const bg       = user.color  || gcUserColor(user.level ?? 2);
+  const fontSize = size <= 24 ? 9 : size <= 36 ? 11 : 13;
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        width: size, height: size, borderRadius: "50%", background: bg,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize, color: "#fff", fontWeight: 700, flexShrink: 0,
+        overflow: "hidden", cursor: onClick ? "pointer" : "default",
+        userSelect: "none",
+        ...s,
+      }}
+    >
+      {user.photoUrl
+        ? <img src={user.photoUrl} alt={user.name || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        : initials}
+    </div>
+  );
+}

@@ -25,6 +25,7 @@ import {
   USER_FUNCTIONS, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES,
   DEMO_PENDING,
 } from './core/constants.js';
+import { gcNormalizeUser } from './core/helpers.js';
 import { GlobalStyles } from './styles/GlobalStyles.jsx';
 import { CoverPage, LoginPage, CreateAccountPage } from './components/Auth.jsx';
 import { SIApp } from './SIApp.jsx';
@@ -326,7 +327,7 @@ export default function App() {
         // GARANTIE : aucun démarrage de machine ne peut jamais réinitialiser le SI.
         // ─────────────────────────────────────────────────────────────────────────────
         const HYDRATE_MAP = [
-          { key: 'users',                    setters: [(v) => setUsersState(v),             (v) => setProdUsers(v)],         fallback: INITIAL_USERS },
+          { key: 'users',                    setters: [(v) => setUsersState(Array.isArray(v) ? v.map(gcNormalizeUser) : v), (v) => setProdUsers(Array.isArray(v) ? v.map(gcNormalizeUser) : v)], fallback: INITIAL_USERS },
           { key: 'dossiers',                 setters: [(v) => setDossiersState(v),          (v) => setProdDossiers(v)],      fallback: INITIAL_DOSSIERS },
           { key: 'taches',                   setters: [(v) => setTachesState(v),            (v) => setProdTaches(v)],        fallback: INITIAL_TACHES },
           { key: 'rdvs',                     setters: [(v) => setRdvsState(v),              (v) => setProdRdvs(v)],          fallback: INITIAL_RDVS },

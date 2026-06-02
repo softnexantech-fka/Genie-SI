@@ -2098,6 +2098,7 @@ export const FILE_TYPE_CONFIG = {
 
 export const GC_AI_CONFIG_KEY="gc-ai-config-v1";
 
+
 export const GC_AI_SUGGESTIONS = {
   default:    ["📋 Résumé procédure", "⚖️ Question juridique OHADA", "📊 Analyse indicateurs", "💡 Recommandation stratégique"],
   juridique:  ["📄 Rédiger un contrat", "⚖️ Analyser jurisprudence", "🔍 Vérification conformité", "📝 Modèle de mise en demeure"],

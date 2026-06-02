@@ -5,7 +5,7 @@ import { FileUploader, SingleFileUploader } from '../../components/FileUploader.
 import { _lsGet, _lsSet, _lsRm, _noop, _tDone, _tActive, formatDate, generateAccessCode, gcFileSave, _activeUser, gcViewDoc, formatDateTime, getProcColor, _gcCachedIp, _GC_MEM, gcDownloadDoc, playSound, gcHashPassword, dsSave, dsSaveUsersWithPrune, gcNormalizeUser, gcNormalizeUserProcess } from '../../core/index.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { STATUS_CONFIG, USER_FUNCTIONS, SUSPENSION_CAUSES, ACCOUNT_STATUS_CONFIG, CODES } from '../../core/constants.js';
-import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, ProgressBar} from '../../components/UI.jsx';
+import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, ProgressBar, UserAvatar} from '../../components/UI.jsx';
 
 export const AdminCodeEditor = ({T, setNotifications, siLogoUrl, setSiLogoUrl, siAppearance, setSiAppearance, siCSSOverrides, setSiCSSOverrides, users, setUsers, dossiers, setDossiers, taches, setTaches, rdvs, setRdvs, pendingApprovals, setPendingApprovals, localUser}) => {
   // ── Upload fichiers via gcFileStore (IndexedDB + serveur) ──────────
@@ -957,7 +957,7 @@ export function AdminConnexionsTab(props) {
             const isBlocked = u.blocked;
             return (
               <div key={u.id} style={{background:T.surface2,border:`1px solid ${isBlocked?"#EF444444":T.border}`,borderRadius:8,padding:"10px 12px",marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:28,height:28,borderRadius:"50%",background:u.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#fff",fontWeight:700,overflow:"hidden",flexShrink:0}}>{u.photoUrl?<img src={u.photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:u.avatar}</div>
+                <UserAvatar user={u} size={28} />
                 <div style={{flex:1}}>
                   <div style={{color:T.text,fontSize:12,fontWeight:600}}>{u.name} {isBlocked&&<span style={{color:"#EF4444",fontSize:9,fontWeight:700}}>🚫 BLOQUÉ</span>}</div>
                   <div style={{color:T.textMuted,fontSize:10}}>{u.role} · Niv.{u.level} · {u.process}</div>
@@ -1032,7 +1032,7 @@ export function AdminConnexionsTab(props) {
             return (
               <div key={user.id} style={{background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",marginBottom:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                  <div style={{width:32,height:32,borderRadius:"50%",background:user.color||"#3B82F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#fff",fontWeight:800,flexShrink:0,overflow:"hidden"}}>{user.photoUrl?<img src={user.photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:user.avatar||user.name?.charAt(0)}</div>
+                  <UserAvatar user={user} size={32} />
                   <div style={{flex:1}}>
                     <div style={{color:T.text,fontWeight:700,fontSize:12}}>{user.name}</div>
                     <div style={{color:T.textMuted,fontSize:9}}>{user.role} · Niv.{user.level}</div>
@@ -1697,7 +1697,7 @@ ${targetUser.name} sera réactivé(e) seulement après approbation DG.`);
             return (
               <div key={u.id} style={{background:T.surface2,border:`1px solid ${status!=="ACTIF"?cfg.color+"44":T.border}`,borderRadius:10,padding:"12px 14px",marginBottom:8}}>
                 <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                  <div style={{width:36,height:36,borderRadius:"50%",background:u.color||"#555",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#fff",fontWeight:700,flexShrink:0,opacity:status!=="ACTIF"?0.6:1,overflow:"hidden"}}>{u.photoUrl?<img src={u.photoUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>:u.avatar}</div>
+                  <UserAvatar user={u} size={36} style={{opacity:status!=="ACTIF"?0.6:1}} />
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                       <span style={{color:T.text,fontWeight:700,fontSize:13}}>{u.name}</span>

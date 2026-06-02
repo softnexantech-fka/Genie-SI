@@ -803,21 +803,26 @@ export const daysLeft = (dateStr) => {
 // FIX v143 — gcNormalizeUser & gcNormalizeUserProcess
 // Garantit la cohérence entre process (singular) et processes (array)
 // ============================================================================
+const _LEVEL_COLORS = { 6:"#C41E3A", 5:"#C9A84C", 4:"#7C3AED", 3:"#0EA5E9", 2:"#10B981", 1:"#6B7280" };
+export const gcUserInitials = (name) => {
+  if (!name || typeof name !== "string") return "??";
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+};
+export const gcUserColor = (userOrLevel) => {
+  const level = typeof userOrLevel === "number" ? userOrLevel : (userOrLevel?.level ?? 2);
+  return _LEVEL_COLORS[level] || _LEVEL_COLORS[2];
+};
 export const gcNormalizeUser = (user) => {
   if (!user) return user;
-  // Assurer que 'process' existe (main process de l'utilisateur)
   const process = user.process || "O01";
-  // Assurer que 'processes' est un array contenant au moins le process principal
   const processes = Array.isArray(user.processes) && user.processes.length > 0
-    ? user.processes
-    : [process];
-  // Vérifier que le process principal est dans la liste des processes
+    ? user.processes : [process];
   const normalizedProcesses = processes.includes(process) ? processes : [process, ...processes];
-  return {
-    ...user,
-    process,
-    processes: normalizedProcesses,
-  };
+  const avatar = user.avatar || gcUserInitials(user.name);
+  const color  = user.color  || gcUserColor(user.level ?? 2);
+  return { ...user, process, processes: normalizedProcesses, avatar, color };
 };
 
 export const gcNormalizeUserProcess = (user, newProcess) => {
