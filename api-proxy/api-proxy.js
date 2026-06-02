@@ -2356,6 +2356,25 @@ async function start() {
     } catch(e) { console.warn('⚠️  Backup auto échoué:', e.message); }
   }, 6 * 60 * 60 * 1000);
 
+  // [T22] Nettoyage tombstones (max 500 IDs par clé) — au démarrage puis toutes les 30 jours
+  const purgeTombstones = async () => {
+    try {
+      const tombstones = await dbGet('gc-tombstones');
+      if (!tombstones || typeof tombstones !== 'object') return;
+      let changed = false;
+      for (const key of Object.keys(tombstones)) {
+        if (Array.isArray(tombstones[key]) && tombstones[key].length > 500) {
+          tombstones[key] = tombstones[key].slice(-500);
+          changed = true;
+        }
+      }
+      if (changed) await dbSet('gc-tombstones', tombstones, 'system');
+      console.log('[T22] Tombstones purgés — clés:', Object.keys(tombstones).length);
+    } catch(e) { console.warn('[T22] Erreur purge tombstones:', e.message); }
+  };
+  purgeTombstones();
+  setInterval(purgeTombstones, 30 * 24 * 60 * 60 * 1000);
+
   // TASK1 — Backup SQLite journalier : immédiat au démarrage puis toutes les 24h
   try { await runBackup(); } catch (_) {}
   setInterval(async () => {

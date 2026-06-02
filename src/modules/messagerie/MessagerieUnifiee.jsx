@@ -3,6 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // MessagerieUnifiee.jsx — SI Génie Consultant v129
 import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, gcCodif, gcCodifMSG, gcFileSave, _activeUser, dsSave, dsOnSync, dsGet } from '../../core/index.js';
+import { useSyncedState } from '../../hooks/useSyncedState.js';
 import { INITIAL_COMMITTEES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, gcOpenPrintWindow } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
@@ -78,8 +79,8 @@ export function MessagerieUnifieeApp({ T, currentUser, users=[], setNotification
   const [showGroupAttach, setShowGroupAttach] = useState(false);
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
   // Brouillons
-  const [drafts, setDrafts] = useState(()=>{try{return JSON.parse(_lsGet("gc-msg-drafts")||"[]");}catch (_) {return [];}});
-  const saveDrafts = (d) => { setDrafts(d); try{_lsSet("gc-msg-drafts",JSON.stringify(d.slice(0,50)));}catch (_) {}};
+  const [drafts, setDrafts] = useSyncedState("gc-msg-drafts", []);
+  const saveDrafts = (d) => setDrafts(d.slice(0, 50));
   const saveDraft = () => {
     if(!compose.subject.trim()&&!compose.body.trim()) return;
     const draft = {...compose, id:"DRF-"+Date.now(), savedAt:new Date().toISOString()};
@@ -91,8 +92,8 @@ export function MessagerieUnifieeApp({ T, currentUser, users=[], setNotification
   const deleteDraft = (id) => saveDrafts(drafts.filter(d=>d.id!==id));
   const openDraft = (draft) => { setCompose(draft); setView("compose"); deleteDraft(draft.id); };
   // Modèles personnalisés (CRUD)
-  const [customTemplates, setCustomTemplates] = useState(()=>{try{return JSON.parse(_lsGet("gc-msg-templates")||"[]");}catch (_) {return [];}});
-  const saveCustomTemplates = (t) => { setCustomTemplates(t); try{_lsSet("gc-msg-templates",JSON.stringify(t));}catch (_) {}};
+  const [customTemplates, setCustomTemplates] = useSyncedState("gc-msg-templates", []);
+  const saveCustomTemplates = (t) => setCustomTemplates(t);
   const [tplModal, setTplModal] = useState(null); // null | {mode:"new"|"edit", data:{}}
   const [tplForm, setTplForm] = useState({id:"",icon:"📝",label:"",body:""});
   // États pièces jointes

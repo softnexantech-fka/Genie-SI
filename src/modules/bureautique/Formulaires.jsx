@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // Formulaires.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop , dsSave } from '../../core/index.js';
+import { _noop } from '../../core/index.js';
+import { useSyncedState } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
 
@@ -12,14 +13,14 @@ export function FormulaireApp({ T, currentUser, setNotifications=_noop }){
   const gcPrompt  = (msg, def, title, icon) => _dlg.prompt(msg, def, title, icon);
 
 
-  const [forms, setForms] = useState(() => { try { return JSON.parse(_lsGet("gc-forms")||"[]"); } catch (_) { return []; }});
+  const [forms, setForms] = useSyncedState("gc-forms", []);
   const [activeForm, setActiveForm] = useState(null);
   const [editMode, setEditMode] = useState(false);
   // FIX v135 — All hooks must be at component root before early returns
   const [resp, setResp] = useState({});
   
   const FIELD_TYPES = [{id:"text",label:"Texte court"},{id:"textarea",label:"Texte long"},{id:"number",label:"Nombre"},{id:"date",label:"Date"},{id:"select",label:"Liste déroulante"},{id:"checkbox",label:"Case à cocher"},{id:"yesno",label:"Oui / Non"}];
-  const save = (f) => { setForms(f); try { _lsSet("gc-forms", JSON.stringify(f)); dsSave("gc-forms",f).catch(err => gcToast.syncError('', err)); } catch (_) {} };
+  const save = (f) => setForms(f);
   const newForm = () => {
     const f = { id:"FM-"+Date.now(), title:"Nouveau formulaire", desc:"", fields:[{id:"f1",type:"text",label:"Champ 1",required:false,options:""}], responses:[], createdAt:new Date().toISOString(), createdBy:currentUser.name };
     const all = [f,...forms]; save(all); setActiveForm(f.id); setEditMode(true);

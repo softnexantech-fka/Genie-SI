@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 // GestionRapide.jsx — SI Génie Consultant v127
 import { useDialog } from '../../components/Dialog.jsx';
-import { _lsGet, _lsSet, _noop, gcCodif, gcCodifTCHE , dsSave } from '../../core/index.js';
+import { _noop, gcCodif, gcCodifTCHE } from '../../core/index.js';
+import { useSyncedState } from '../../hooks/useSyncedState.js';
 import { GC_ALL_SUBPROCS } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
@@ -11,30 +12,31 @@ export function GestionRapideUnifiee({ T, currentUser, setNotifications=_noop, d
   const gcConfirm = (msg, title, icon, danger) => _dlg.confirm(msg, title, icon, danger);
   const YEAR = new Date().getFullYear();
   const [tab, setTab] = useState("kanban"); // kanban | taches | dossiers | notes | archives
-  const [kanbanCols, setKanbanCols] = useState(()=>{try{return JSON.parse(_lsGet("gc-kanban-cols-v2")||"null")||[
+  const DEFAULT_KANBAN_COLS = [
     {id:"todo",label:"📋 À Faire",color:"#3B82F6"},
     {id:"inprog",label:"⚙️ En Cours",color:"#F59E0B"},
     {id:"review",label:"🔍 En Révision",color:"#8B5CF6"},
     {id:"done",label:"✅ Terminé",color:"#22C55E"},
-  ];}catch (_) {return [];}});
-  const [kanbanCards, setKanbanCards] = useState(()=>{try{return JSON.parse(_lsGet("gc-kanban-cards-v2")||"[]");}catch (_) {return [];}});
+  ];
+  const [kanbanCols, setKanbanCols] = useSyncedState("gc-kanban-cols-v2", DEFAULT_KANBAN_COLS);
+  const [kanbanCards, setKanbanCards] = useSyncedState("gc-kanban-cards-v2", []);
   const [dragging, setDragging] = useState(null);
   const [showNewCard, setShowNewCard] = useState(null);
   const [newCard, setNewCard] = useState({title:"",desc:"",priority:"NORMALE",tags:"",assignee:"",dossier:"",subproc:"O01.02",dueDate:""});
   const [showNewCol, setShowNewCol] = useState(false);
   const [newColLabel, setNewColLabel] = useState("");
   const [taskSearch, setTaskSearch] = useState("");
-  const [notesList, setNotesList] = useState(()=>{try{return JSON.parse(_lsGet("gc-notes-rapides")||"[]");}catch (_) {return [];}});
+  const [notesList, setNotesList] = useSyncedState("gc-notes-rapides", []);
   const [noteForm, setNoteForm] = useState({title:"",content:"",category:"NOTE",priority:"NORMALE",tags:"",color:"#6366F1"});
   const [editNote, setEditNote] = useState(null);
-  const [archives, setArchives] = useState(()=>{try{return JSON.parse(_lsGet("gc-gestion-archives")||"[]");}catch (_) {return [];}});
+  const [archives, setArchives] = useSyncedState("gc-gestion-archives", []);
 
   const saveKanban = (cols, cards) => {
-    if(cols) { setKanbanCols(cols); try{_lsSet("gc-kanban-cols-v2",JSON.stringify(cols));dsSave("gc-kanban-cols-v2",cols).catch(err => gcToast.syncError('', err));}catch (_) {} }
-    if(cards) { setKanbanCards(cards); try{_lsSet("gc-kanban-cards-v2",JSON.stringify(cards.slice(0,200)));dsSave("gc-kanban-cards-v2",cards.slice(0,200)).catch(err => gcToast.syncError('', err));}catch (_) {} }
+    if(cols) setKanbanCols(cols);
+    if(cards) setKanbanCards(cards.slice(0, 200));
   };
 
-  const saveNotes = n => { setNotesList(n); try{_lsSet("gc-notes-rapides",JSON.stringify(n.slice(0,100)));dsSave("gc-notes-rapides",n.slice(0,100)).catch(err => gcToast.syncError('', err));}catch (_) {}; };
+  const saveNotes = n => setNotesList(n.slice(0, 100));
 
   const addCard = (colId) => {
     if(!newCard.title.trim()) return;
@@ -53,7 +55,7 @@ export function GestionRapideUnifiee({ T, currentUser, setNotifications=_noop, d
 
   const deleteCard = (cardId) => {
     const card = kanbanCards.find(c=>c.id===cardId);
-    if(card) setArchives(a=>{const n=[{...card,archivedAt:new Date().toISOString(),archivedBy:currentUser?.name},...a];try{_lsSet("gc-gestion-archives",JSON.stringify(n.slice(0,200)));dsSave("gc-gestion-archives",n.slice(0,200)).catch(err => gcToast.syncError('', err));}catch (_) {}return n;});
+    if(card) setArchives(a => [{...card,archivedAt:new Date().toISOString(),archivedBy:currentUser?.name},...a].slice(0,200));
     saveKanban(null, kanbanCards.filter(c=>c.id!==cardId));
   };
 
