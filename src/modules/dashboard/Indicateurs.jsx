@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 // Indicateurs.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _tDone, formatCFA, useSI, _activeUser, getProcColor, dsGet, dsOnSync } from '../../core/index.js';
+import { useSyncedState } from '../../hooks/useSyncedState.js';
 import { STATUS_CONFIG, CODES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, ProgressBar} from '../../components/UI.jsx';
 
@@ -68,7 +69,7 @@ export const Indicateurs = React.memo(function Indicateurs() {
   const saveDgView = v => { setDgView(v); try{_lsSet("gc-kpi-dg-view",v);}catch(_){} };
   const [drillDown, setDrillDown] = useState(null);
   const [showAlertConfig, setShowAlertConfig] = useState(false);
-  const [savedAlerts, setSavedAlerts] = useState(() => { try{return JSON.parse(_lsGet("gc-kpi-alerts")||"[]");}catch(_){return[];} });
+  const [savedAlerts, setSavedAlerts] = useSyncedState("gc-kpi-alerts", []);
   const [alertForm, setAlertForm] = useState({ type:"SEUIL", kpi:"CA_REALISE", operateur:">", valeur:"", message:"", destinataire:uid });
 
   // ERP — read once on mount
@@ -223,10 +224,10 @@ export const Indicateurs = React.memo(function Indicateurs() {
   const saveKpiAlert = () => {
     if(!alertForm.valeur) return;
     const a={...alertForm,id:"ALT-"+Date.now(),createdAt:new Date().toISOString(),active:true};
-    const u=[...savedAlerts,a]; setSavedAlerts(u); try{_lsSet("gc-kpi-alerts",JSON.stringify(u));}catch(_){}
+    setSavedAlerts([...savedAlerts, a]);
     setNotifications(p=>[{id:"N"+Date.now(),icon:"🔔",message:`Alerte KPI — ${alertForm.kpi} ${alertForm.operateur} ${alertForm.valeur}`,at:new Date().toISOString(),read:false},...p]);
   };
-  const deleteKpiAlert = id => { const u=savedAlerts.filter(a=>a.id!==id); setSavedAlerts(u); try{_lsSet("gc-kpi-alerts",JSON.stringify(u));}catch(_){}; };
+  const deleteKpiAlert = id => setSavedAlerts(savedAlerts.filter(a => a.id !== id));
 
   return (
     <div>

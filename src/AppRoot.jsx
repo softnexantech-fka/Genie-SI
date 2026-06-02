@@ -272,6 +272,13 @@ export default function App() {
   }, []);
   const [pendingAccountActions, setPendingAccountActions] = useState(() => { try { return JSON.parse(_lsGet("gc-account-actions")||"null") || INITIAL_ACCOUNT_ACTIONS; } catch (_) { return INITIAL_ACCOUNT_ACTIONS; } });
 
+  // ── États pour clés précédemment non hydratées ───────────────────────────
+  const [securityAlerts, setSecurityAlerts] = useState(() => { try { return JSON.parse(_lsGet("gc-security-alerts")||"[]"); } catch (_) { return []; } });
+  const [kpiAlerts, setKpiAlerts] = useState(() => { try { return JSON.parse(_lsGet("gc-kpi-alerts")||"[]"); } catch (_) { return []; } });
+  const [gcFileCatalog, setGcFileCatalog] = useState(() => { try { return JSON.parse(_lsGet("gc-files")||"null") || []; } catch (_) { return []; } });
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => { try { return JSON.parse(_lsGet("gc-auto-backup-enabled")||"true"); } catch (_) { return true; } });
+  const [autoBackupInterval, setAutoBackupInterval] = useState(() => { try { return parseInt(_lsGet("gc-auto-backup-interval")||"5", 10); } catch (_) { return 5; } });
+
   const setPAA = useCallback((v) => {
     setPendingAccountActions(prev => {
       const resolved = typeof v === 'function' ? v(prev) : v;
@@ -483,7 +490,12 @@ export default function App() {
 
           // ── FIX vNext T14 : Admin ─────────────────────────────────────────────────
           { key: 'gc-presence',              setters: [(v) => { try { _lsSet('gc-presence', JSON.stringify(v)); } catch (_) {} }],              fallback: [] },
-          { key: 'gc-security-alerts',       setters: [(v) => { try { _lsSet('gc-security-alerts', JSON.stringify(v)); } catch (_) {} }],       fallback: [] },
+          { key: 'gc-security-alerts',       setters: [(v) => { setSecurityAlerts(v); try { _lsSet('gc-security-alerts', JSON.stringify(v)); } catch (_) {} }],  fallback: [] },
+          { key: 'gc-kpi-alerts',            setters: [(v) => { setKpiAlerts(v);      try { _lsSet('gc-kpi-alerts', JSON.stringify(v)); } catch (_) {} }],            fallback: [] },
+          { key: 'gc-kpi-dg-view',           setters: [(v) => { try { _lsSet('gc-kpi-dg-view', typeof v === 'string' ? v : JSON.stringify(v)); } catch (_) {} }],     fallback: "global" },
+          { key: 'gc-files',                 setters: [(v) => { setGcFileCatalog(v);  try { _lsSet('gc-files', JSON.stringify(v)); } catch (_) {} }],                  fallback: [] },
+          { key: 'gc-auto-backup-enabled',   setters: [(v) => { setAutoBackupEnabled(v);  try { _lsSet('gc-auto-backup-enabled', JSON.stringify(v)); } catch (_) {} }], fallback: true },
+          { key: 'gc-auto-backup-interval',  setters: [(v) => { setAutoBackupInterval(v); try { _lsSet('gc-auto-backup-interval', String(v)); } catch (_) {} }],        fallback: 5 },
           { key: 'gc-matrix-log',            setters: [(v) => { try { _lsSet('gc-matrix-log', JSON.stringify(v)); } catch (_) {} }],            fallback: [] },
 
           // ── FIX vNext T15 : Analyse Stratégique ───────────────────────────────────
@@ -1642,6 +1654,16 @@ export default function App() {
           setRequireConnApproval={setRequireConnApproval}
           siSystemDocs={siSystemDocs}
           setSiSystemDocs={setSiSystemDocs}
+          securityAlerts={securityAlerts}
+          setSecurityAlerts={setSecurityAlerts}
+          kpiAlerts={kpiAlerts}
+          setKpiAlerts={setKpiAlerts}
+          gcFileCatalog={gcFileCatalog}
+          setGcFileCatalog={setGcFileCatalog}
+          autoBackupEnabled={autoBackupEnabled}
+          setAutoBackupEnabled={setAutoBackupEnabled}
+          autoBackupInterval={autoBackupInterval}
+          setAutoBackupInterval={setAutoBackupInterval}
         />
         </SIErrorBoundary>
         </DialogProvider>

@@ -69,7 +69,13 @@ export function SIApp(props) {
   const gcPrompt  = (msg, def, title, icon) => _dlg.prompt(msg, def, title, icon);
 
 
-  const { currentUser, users=[], setUsers, dossiers=[], setDossiers, taches=[], setTaches, rdvs=[], setRdvs, onLogout, T, toggleTheme, themeMode, pendingApprovals=[], setPendingApprovals, pendingConnectionsRoot=[], setPendingConnectionsRoot, onFactoryReset, isDemoMode, onExitDemo, siLogoUrl, setSiLogoUrl, siAppearance, setSiAppearance, siCSSOverrides, setSiCSSOverrides, sessionLogs=[], setSessionLogs, addSessionLog, pendingAccountActions=[], setPendingAccountActions, partnersRoot=[], setPartnersRoot, appHabilitations=[], setAppHabilitations, appAccessCodes=[], setAppAccessCodes, requireConnApproval, setRequireConnApproval, siSystemDocs=[], setSiSystemDocs } = props; // FIX v62: addSessionLog restauré dans props (défini dans App())
+  const { currentUser, users=[], setUsers, dossiers=[], setDossiers, taches=[], setTaches, rdvs=[], setRdvs, onLogout, T, toggleTheme, themeMode, pendingApprovals=[], setPendingApprovals, pendingConnectionsRoot=[], setPendingConnectionsRoot, onFactoryReset, isDemoMode, onExitDemo, siLogoUrl, setSiLogoUrl, siAppearance, setSiAppearance, siCSSOverrides, setSiCSSOverrides, sessionLogs=[], setSessionLogs, addSessionLog, pendingAccountActions=[], setPendingAccountActions, partnersRoot=[], setPartnersRoot, appHabilitations=[], setAppHabilitations, appAccessCodes=[], setAppAccessCodes, requireConnApproval, setRequireConnApproval, siSystemDocs=[], setSiSystemDocs,
+  securityAlerts=[], setSecurityAlerts,
+  kpiAlerts=[], setKpiAlerts,
+  gcFileCatalog=[], setGcFileCatalog,
+  autoBackupEnabled=true, setAutoBackupEnabled,
+  autoBackupInterval=5, setAutoBackupInterval,
+} = props; // FIX v62: addSessionLog restauré dans props (défini dans App())
   // FIX vREFRESH — Restaurer le module actif depuis sessionStorage (F5/Ctrl+R conserve la page courante)
   // sessionStorage persiste au rafraîchissement mais PAS à la fermeture de l'onglet/nouvelle connexion.
   const [activeModule, setActiveModule] = useState(() => {
@@ -1685,6 +1691,12 @@ export function SIApp(props) {
           siSystemDocs={siSystemDocs}
           taches={taches}
           users={users}
+          securityAlerts={securityAlerts}
+          setSecurityAlerts={setSecurityAlerts}
+          autoBackupEnabled={autoBackupEnabled}
+          setAutoBackupEnabled={setAutoBackupEnabled}
+          autoBackupInterval={autoBackupInterval}
+          setAutoBackupInterval={setAutoBackupInterval}
         />;
       case "sirh": case "logistique": case "conformite":
       case "communication": case "finance": case "juridique":

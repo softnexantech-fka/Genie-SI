@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { gcFileSave, gcFileDownload, gcFileDelete, gcFileUrl, gcProxyStatus, gcFileStats} from '../core/index.js';
+import { gcToast } from './ToastManager.jsx';
 
 // ============================================================
 // FileUploader.jsx — Composant upload universel
@@ -94,7 +95,9 @@ export function FileUploader({
       onFilesChange && onFilesChange([...files, ...newFileRefs]);
     }
     if (issues.length > 0) {
-      setError(issues.join(' · '));
+      const msg = issues.join(' · ');
+      setError(msg);
+      gcToast.error(msg);
     }
     setUploading(false);
   }, [disabled, files, maxSizeMB, meta, onFilesChange]);
@@ -118,14 +121,18 @@ export function FileUploader({
       if (isObjectUrl) setTimeout(() => URL.revokeObjectURL(url), 5000);
     } else {
       // FIX BUG-FILE-1 — Message d'erreur visible au lieu de silence total
-      setError(`❌ Impossible d'ouvrir "${fileRef.nom}" : ${error || 'fichier introuvable sur le serveur'}`);
+      const msg = `Impossible d'ouvrir "${fileRef.nom}" : ${error || 'fichier introuvable sur le serveur'}`;
+      setError(`❌ ${msg}`);
+      gcToast.error(msg);
     }
   };
 
   const handleDownload = async (fileRef) => {
     const result = await gcFileDownload(fileRef);
     if (result && !result.ok) {
-      setError(`❌ Téléchargement impossible pour "${fileRef.nom}" : ${result.error || 'fichier introuvable'}`);
+      const dlMsg = `Téléchargement impossible pour "${fileRef.nom}" : ${result.error || 'fichier introuvable'}`;
+      setError(`❌ ${dlMsg}`);
+      gcToast.error(dlMsg);
     }
   };
 

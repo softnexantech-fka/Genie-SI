@@ -156,7 +156,11 @@ export function DelaisAdminPanel({ T, localUser, setNotifications=_noop}){
 }
 
 
-export function AdminPanel({ T, addSessionLog, dossiers=[], generateAccessCode, handleSetPendingConnections, isAdmin, localUser, onFactoryReset, partners=[], pendingApprovals=[], pendingConnections=[], rdvs=[], requireConnApproval, sessionLogs=[], setDossiers=_noop, setNotifications=_noop, setPartnersSync=_noop, setPendingApprovals=_noop, setRdvs=_noop, setRequireConnApproval=_noop, setSessionLogs=_noop, setSiAppearance=_noop, setSiCSSOverrides=_noop, setSiLogoUrl=_noop, setSiSystemDocs=_noop, setTaches=_noop, setUsers=_noop, siAppearance, siCSSOverrides, siLogoUrl, siSystemDocs, taches=[], users=[] }) {
+export function AdminPanel({ T, addSessionLog, dossiers=[], generateAccessCode, handleSetPendingConnections, isAdmin, localUser, onFactoryReset, partners=[], pendingApprovals=[], pendingConnections=[], rdvs=[], requireConnApproval, sessionLogs=[], setDossiers=_noop, setNotifications=_noop, setPartnersSync=_noop, setPendingApprovals=_noop, setRdvs=_noop, setRequireConnApproval=_noop, setSessionLogs=_noop, setSiAppearance=_noop, setSiCSSOverrides=_noop, setSiLogoUrl=_noop, setSiSystemDocs=_noop, setTaches=_noop, setUsers=_noop, siAppearance, siCSSOverrides, siLogoUrl, siSystemDocs, taches=[], users=[],
+  securityAlerts: securityAlertsProp=[], setSecurityAlerts: setSecurityAlertsProp=_noop,
+  autoBackupEnabled: autoBackupEnabledProp, setAutoBackupEnabled: setAutoBackupEnabledProp=_noop,
+  autoBackupInterval: autoBackupIntervalProp, setAutoBackupInterval: setAutoBackupIntervalProp=_noop,
+}) {
   const _dlg = useDialog();
   const gcAlert   = (msg, title, icon) => _dlg.alert(msg, title, icon);
   const gcConfirm = (msg, title, icon, danger) => _dlg.confirm(msg, title, icon, danger);
@@ -195,8 +199,11 @@ export function AdminPanel({ T, addSessionLog, dossiers=[], generateAccessCode, 
       { id:"sessionLogs", label:"🔐 Journaux session",  keys:[], stateKey:"sessionLogs" },
     ];
     const [backupModules, setBackupModules] = useState({ users:true, dossiers:true, taches:true, rdvs:true, partners:true, approvals:true, finance:true, sirh:true, docs:false, audit:false, logistique:false, comm:false, messages:false, sessionLogs:false });
-    const [autoBackupEnabled, setAutoBackupEnabled] = useState(() => { try { return JSON.parse(_lsGet("gc-auto-backup-enabled")||"true"); } catch(_){return true;} });
-    const [autoBackupInterval, setAutoBackupInterval] = useState(() => { try { return parseInt(_lsGet("gc-auto-backup-interval")||"5",10); } catch(_){return 5;} });
+    // autoBackupEnabled / autoBackupInterval : gérés par AppRoot (hydratés depuis serveur)
+    const autoBackupEnabled = autoBackupEnabledProp !== undefined ? autoBackupEnabledProp : true;
+    const setAutoBackupEnabled = (v) => { _lsSet("gc-auto-backup-enabled", JSON.stringify(v)); dsSave("gc-auto-backup-enabled", v).catch(()=>{}); setAutoBackupEnabledProp(v); };
+    const autoBackupInterval = autoBackupIntervalProp !== undefined ? autoBackupIntervalProp : 5;
+    const setAutoBackupInterval = (v) => { _lsSet("gc-auto-backup-interval", String(v)); dsSave("gc-auto-backup-interval", v).catch(()=>{}); setAutoBackupIntervalProp(v); };
     const [lastGranularBackup, setLastGranularBackup] = useState(() => { try { const r=_lsGet(GC_GRANULAR_BACKUP_KEY); if(!r)return null; const p=JSON.parse(r); return {exportedAt:p.exportedAt,exportedBy:p.exportedBy,modules:p.modules}; } catch(_){return null;} });
     const [backupImportMsg, setBackupImportMsg] = useState("");
     const [backupImporting, setBackupImporting] = useState(false);
@@ -615,6 +622,7 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
           ...(isAdmin ? [{ id: "matrix", icon: "🗂️", label: "Matrice Programmes" }] : []),
           // v116 — Organigramme, Circuits, Accréditations → Processus & Hiérarchie (pas de doublon)
           ...((isAdmin || isMG) ? [{ id: "ia_config", icon: "🤖", label: "Assistant IA" }] : []),
+          ...(isAdmin ? [{ id: "securite", icon: "🛡️", label: `Alertes Séc. (${(securityAlertsProp||[]).length})` }] : []),
           ...(isAdmin ? [{ id: "export_backup", icon: "💾", label: "Export/Import" }] : []),
           ...(!isAdmin && isMG ? [{ id: "export_backup", icon: "💾", label: "Export/Import" }] : []),
         ]} active={adminTab} onChange={setAdminTab} T={T} />
@@ -1261,6 +1269,45 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
         )}
 
         {/* ── CONFIG DÉLAIS & ALERTES ── */}
+        {/* ── ALERTES SÉCURITÉ ── */}
+        {adminTab === "securite" && (() => {
+          const alerts = securityAlertsProp || [];
+          const sortedAlerts = [...alerts].sort((a,b) => new Date(b.at||b.date||0) - new Date(a.at||a.date||0));
+          const clearAlerts = () => { setSecurityAlertsProp([]); dsSave('gc-security-alerts', []).catch(()=>{}); };
+          const SEVER_CFG = { CRITIQUE: { bg: "#FF0000", color: "#fff" }, HAUTE: { bg: "#EF444433", color: "#EF4444" }, MOYENNE: { bg: "#F59E0B33", color: "#F59E0B" }, INFO: { bg: "#3B82F633", color: "#3B82F6" } };
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ color: T.text, fontWeight: 800, fontSize: 14 }}>🛡️ Alertes de Sécurité Système</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <span style={{ color: T.textMuted, fontSize: 11 }}>{alerts.length} événement(s)</span>
+                  {alerts.length > 0 && <button onClick={clearAlerts} style={{ background: "#EF444422", border: "1px solid #EF444466", color: "#EF4444", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 11 }}>🗑️ Tout effacer</button>}
+                </div>
+              </div>
+              {sortedAlerts.length === 0 ? (
+                <div style={{ color: T.textMuted, fontSize: 12, textAlign: "center", padding: 32, background: T.surface2, borderRadius: 10 }}>✅ Aucune alerte de sécurité enregistrée</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 520, overflowY: "auto" }}>
+                  {sortedAlerts.map((a, i) => {
+                    const sev = a.severity || a.level || "INFO";
+                    const cfg = SEVER_CFG[sev] || SEVER_CFG.INFO;
+                    return (
+                      <div key={a.id || i} style={{ background: cfg.bg, border: `1px solid ${cfg.color}44`, borderRadius: 8, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ color: cfg.color, fontWeight: 700, fontSize: 11 }}>{sev}</span>
+                          <span style={{ color: T.textMuted, fontSize: 10 }}>{a.at ? new Date(a.at).toLocaleString('fr-FR') : a.date || "—"}</span>
+                        </div>
+                        <div style={{ color: T.text, fontSize: 12 }}>{a.message || a.msg || JSON.stringify(a)}</div>
+                        {a.userId && <div style={{ color: T.textMuted, fontSize: 10 }}>Utilisateur : {a.userId} {a.ip ? `— IP : ${a.ip}` : ""}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {adminTab === "delais_config" && (
           <DelaisAdminPanel T={T} localUser={localUser} setNotifications={setNotifications} />
         )}
@@ -1302,7 +1349,7 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
                   <div style={{color:"#C4D4E8",fontWeight:700,fontSize:12,marginBottom:10}}>⏱️ Sauvegarde automatique</div>
                   <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
                     <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
-                      <div onClick={()=>{const v=!autoBackupEnabled;setAutoBackupEnabled(v);_lsSet("gc-auto-backup-enabled",JSON.stringify(v));}}
+                      <div onClick={()=>{setAutoBackupEnabled(!autoBackupEnabled);}}
                         style={{width:40,height:22,borderRadius:11,background:autoBackupEnabled?"#22C55E":"#374151",transition:"background 0.2s",position:"relative",cursor:"pointer",flexShrink:0}}>
                         <div style={{position:"absolute",top:3,left:autoBackupEnabled?20:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
                       </div>
@@ -1312,7 +1359,7 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{color:"#7A90B0",fontSize:11}}>Intervalle :</span>
                         {[1,5,15,30,60].map(v=>(
-                          <button key={v} onClick={()=>{setAutoBackupInterval(v);_lsSet("gc-auto-backup-interval",String(v));}}
+                          <button key={v} onClick={()=>{setAutoBackupInterval(v);}}
                             style={{background:autoBackupInterval===v?"#C9A84C22":"#0D1B2A",border:`1px solid ${autoBackupInterval===v?"#C9A84C":"#1E3A5F"}`,color:autoBackupInterval===v?"#C9A84C":"#7A90B0",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontWeight:autoBackupInterval===v?800:400,fontSize:10}}>
                             {v===60?"1h":`${v}min`}
                           </button>
