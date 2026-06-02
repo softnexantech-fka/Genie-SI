@@ -2356,9 +2356,17 @@ async function start() {
     } catch(e) { console.warn('⚠️  Backup auto échoué:', e.message); }
   }, 6 * 60 * 60 * 1000);
 
-  // [T22] Nettoyage tombstones (max 500 IDs par clé) — au démarrage puis toutes les 30 jours
+  // [T22] Nettoyage tombstones — 1x par mois le 1er du mois à 15h30
+  // Vérifié chaque heure ; ne s'exécute qu'une fois par mois (garde-fou via lastPurgeTombstones).
   const purgeTombstones = async () => {
     try {
+      const now = new Date();
+      const lastRun = await dbGet('gc-tombstones-last-purge').catch(() => null);
+      if (lastRun) {
+        const last = new Date(lastRun);
+        // Ne pas relancer si déjà fait ce mois-ci
+        if (last.getFullYear() === now.getFullYear() && last.getMonth() === now.getMonth()) return;
+      }
       const tombstones = await dbGet('gc-tombstones');
       if (!tombstones || typeof tombstones !== 'object') return;
       let changed = false;
@@ -2369,11 +2377,18 @@ async function start() {
         }
       }
       if (changed) await dbSet('gc-tombstones', tombstones, 'system');
-      console.log('[T22] Tombstones purgés — clés:', Object.keys(tombstones).length);
+      await dbSet('gc-tombstones-last-purge', now.toISOString(), 'system');
+      console.log(`[T22] Tombstones purgés le ${now.toLocaleDateString('fr-FR')} à ${now.toLocaleTimeString('fr-FR')} — clés: ${Object.keys(tombstones).length}`);
     } catch(e) { console.warn('[T22] Erreur purge tombstones:', e.message); }
   };
-  purgeTombstones();
-  setInterval(purgeTombstones, 30 * 24 * 60 * 60 * 1000);
+  // Vérification horaire : déclenche à 15h30 le 1er de chaque mois
+  const _scheduleTombstonePurge = () => {
+    const now = new Date();
+    const h = now.getHours(), m = now.getMinutes(), d = now.getDate();
+    if (d === 1 && h === 15 && m >= 30 && m < 60) purgeTombstones();
+    // Sinon vérification toutes les heures (overhead négligeable)
+  };
+  setInterval(_scheduleTombstonePurge, 60 * 60 * 1000); // vérification horaire
 
   // TASK1 — Backup SQLite journalier : immédiat au démarrage puis toutes les 24h
   try { await runBackup(); } catch (_) {}
