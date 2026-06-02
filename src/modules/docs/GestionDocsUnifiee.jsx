@@ -3,7 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // GestionDocsUnifiee.jsx — SI Génie Consultant v129
 import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, useSI, gcFileSave, _activeUser, gcAICall, dsSave, dsMarkDeleted, dsDeleteItemFromArray } from '../../core/index.js';
-import { GC_DOCS_REQUIS, CRM_SEGMENTS_C, CRM_SECTEURS_C, CRM_SOURCES_C, CRM_TYPES_INTERACTION_C, CRM_TYPES_RELANCE_C, CRM_ETAPES_C, CRM_RISKS_C, CRM_KYC_C, CRM_STATUTS_C, CRM_PROCS_METIER_C } from '../../core/constants.js';
+import { GC_DOCS_REQUIS, CRM_SEGMENTS_C, CRM_SECTEURS_C, CRM_SOURCES_C, CRM_TYPES_INTERACTION_C, CRM_TYPES_RELANCE_C, CRM_ETAPES_C, CRM_RISKS_C, CRM_KYC_C, CRM_STATUTS_C, CRM_PROCS_METIER_C, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { AIAssistant } from '../../components/AIAssistant.jsx';
 import { DelaiConfigPanelO01 } from '../admin/SIConfigPanels.jsx';
@@ -748,29 +748,8 @@ Notes : ${client.notes||"Aucune"}`;
     setShowNewDoc(false);
   };
 
-  // FIX v153 — downloadDoc gère serverUrl (priorité) et dataUrl (fallback)
-  const downloadDoc = async doc => {
-    const src = doc.serverUrl || doc.url;
-    if (!src) { gcAlert("⚠️ Aucun fichier disponible."); return; }
-    try {
-      if (doc.serverUrl) {
-        const token = (() => { try { return localStorage.getItem('gc-jwt-token') || localStorage.getItem('authToken') || null; } catch { return null; } })();
-        const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
-        const r = await fetch(doc.serverUrl, { headers });
-        if (r.ok) {
-          const blob = await r.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const a = document.createElement("a"); a.href = blobUrl; a.download = doc.name || "document";
-          document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 15_000);
-          return;
-        }
-      }
-      // Fallback dataUrl
-      const a = document.createElement("a"); a.href = src; a.download = doc.name || "document";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } catch (err) { gcAlert("Erreur téléchargement : " + err.message); }
-  };
+  const downloadDoc = (doc) => gcDownloadDoc({ id:doc.id, serverUrl:doc.serverUrl, url:doc.url, dataUrl:doc.dataUrl, nom:doc.name, name:doc.name });
+  const viewDoc    = (doc) => gcViewDoc({ id:doc.id, serverUrl:doc.serverUrl, url:doc.url, dataUrl:doc.dataUrl, nom:doc.name, name:doc.name });
 
   // FIX v153 — archiveDoc gère la suppression et archivage de document
   const archiveDoc = async doc => {
@@ -1510,7 +1489,8 @@ Notes : ${client.notes||"Aucune"}`;
                           <span>{DI[doc.type]||"📎"}</span>
                           <span style={{color:T.text,fontSize:10,flex:1}}>{doc.name}</span>
                           <span style={{color:T.textDim,fontSize:9}}>{doc.type} · {(doc.createdAt||"").slice(0,10)}</span>
-                          {doc.url&&<button onClick={async e=>{e.stopPropagation();downloadDoc(doc);}} style={{background:"transparent",border:"none",color:"#3B82F6",cursor:"pointer",fontSize:10}}>⬇</button>}
+                          {(doc.id||doc.serverUrl||doc.url||doc.dataUrl)&&<button onClick={e=>{e.stopPropagation();viewDoc(doc);}} style={{background:"transparent",border:"none",color:"#10B981",cursor:"pointer",fontSize:10}}>👁️</button>}
+                          {(doc.id||doc.serverUrl||doc.url||doc.dataUrl)&&<button onClick={e=>{e.stopPropagation();downloadDoc(doc);}} style={{background:"transparent",border:"none",color:"#3B82F6",cursor:"pointer",fontSize:10}}>⬇</button>}
                         </div>)}
                       </div>}
                     </div>
@@ -1545,7 +1525,8 @@ Notes : ${client.notes||"Aucune"}`;
                     </div>
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
-                    {d.url&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>⬇</button>}
+                    {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>viewDoc(d)} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>👁️ Voir</button>}
+                    {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>⬇ DL</button>}
                     {/* FIX v123 — bouton ✏️ manquant : documents non modifiables */}
                     {canEditDoc&&<button onClick={()=>openEditDoc(d)} title="Modifier" style={{background:"#6366F122",border:"1px solid #6366F144",color:"#6366F1",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>✏️</button>}
                     <button onClick={()=>archiveDoc(d)} style={{background:"#6B708022",border:"1px solid #6B708044",color:"#6B7080",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>🗃️</button>

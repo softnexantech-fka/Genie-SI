@@ -5,6 +5,7 @@ import { FileUploader, SingleFileUploader } from '../../components/FileUploader.
 import { _lsGet, _lsSet, _noop, playSound, useSI, gcFileSave , dsSave, dsOnSync, dsGet } from '../../core/index.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
+import { gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 
 export function JuridiqueApp({ T, currentUser, setNotifications=_noop, dossiers=[], setDossiers=_noop, taches=[], setTaches=_noop, users=[], partners=[], docs=[], setDocs=_noop, standaloneDocuments=[], saveStandaloneDocs=_noop }){
   // ── Upload fichiers via gcFileStore (IndexedDB + serveur) ──────────
@@ -693,7 +694,8 @@ export function JuridiqueApp({ T, currentUser, setNotifications=_noop, dossiers=
                           <div style={{color:T.textMuted,fontSize:9}}>{d.sizeStr||"—"} · {d.createdBy||d.uploadedBy||"SI"} · {d.process||"O02"}</div>
                         </div>
                         <div style={{display:"flex",gap:5}}>
-                          {d.url && <button onClick={()=>{const a=document.createElement("a");a.href=d.url; a.target="_blank"; a.click();}} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:9,fontWeight:700}}>⬇ DL</button>}
+                          {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>gcViewDoc({id:d.id,serverUrl:d.serverUrl,url:d.url,dataUrl:d.dataUrl,nom:d.name||d.ref,name:d.name||d.ref})} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:9,fontWeight:700}}>👁️ Voir</button>}
+                          {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>gcDownloadDoc({id:d.id,serverUrl:d.serverUrl,url:d.url,dataUrl:d.dataUrl,nom:d.name||d.ref,name:d.name||d.ref})} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:9,fontWeight:700}}>⬇ DL</button>}
                         </div>
                       </div>
                     ))}

@@ -3,7 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // SIRHModule.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, formatDate, gcFileSave, _activeUser, getProcColor , dsSave } from '../../core/index.js';
-import { INITIAL_SIRH_PRESENCES, INITIAL_SIRH_LEAVES, INITIAL_RECRUTEMENTS, CODES } from '../../core/constants.js';
+import { INITIAL_SIRH_PRESENCES, INITIAL_SIRH_LEAVES, INITIAL_RECRUTEMENTS, CODES, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
 import { FiscalConfigPanel } from '../admin/SIConfigPanels.jsx';
 import { PaieSimulateur } from '../finance/FinanceApp.jsx';
@@ -2276,7 +2276,8 @@ export function BaseFichiersRH({ T, currentUser, users=[], isDemoMode=false }) {
               {f.fileName&&<div style={{color:"#3B82F6",fontSize:9,marginTop:2}}>📎 {f.fileName}</div>}
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0}}>
-              {f.fileData&&<button onClick={()=>{const a=document.createElement("a");a.href=f.fileData;a.download=f.fileName||f.nom;a.click();}} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>⬇️</button>}
+              {(f.id||f.serverUrl||f.url||f.fileData)&&<button onClick={()=>gcViewDoc({id:f.id,serverUrl:f.serverUrl,url:f.url,dataUrl:f.fileData,nom:f.fileName||f.nom,name:f.fileName||f.nom})} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>👁️</button>}
+              {(f.id||f.serverUrl||f.url||f.fileData)&&<button onClick={()=>gcDownloadDoc({id:f.id,serverUrl:f.serverUrl,url:f.url,dataUrl:f.fileData,nom:f.fileName||f.nom,name:f.fileName||f.nom})} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>⬇️</button>}
               <button onClick={async () => {if(await gcConfirm("Supprimer ce fichier ?"))saveFichiers(fichiers.filter(x=>x.id!==f.id));}} style={{background:"#EF444415",border:"1px solid #EF444433",color:"#EF4444",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>🗑️</button>
             </div>
           </div>

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader } from '../../components/FileUploader.jsx';
 import { _lsGet, _lsSet, _noop, playSound, formatCFA, formatDate, formatDateTime, _dataUrlToBlob, gcFileSave, getProcColor, getUser, gcDelaiStatut, daysLeft } from '../../core/index.js';
-import { STATUS_CONFIG, PRIORITY_CONFIG, CODES } from '../../core/constants.js';
+import { STATUS_CONFIG, PRIORITY_CONFIG, CODES, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge, ProgressBar} from '../../components/UI.jsx';
 // NOTE: Ce module utilise FileUploader + gcFileSave pour les uploads
 // (remplacement progressif des readAsDataURL)
@@ -78,23 +78,18 @@ export function DossierDetailModal({ dossier, setSelectedDossier=_noop, T, local
 
     const handleDownload = (f) => {
       if (f.accessLevel > (localUser?.level || 0) && !isAdmin) { gcAlert("Accès refusé — Habilitation insuffisante."); return; }
-      const src = f.dataUrl || f.fileData;
-      if (!src) { gcAlert("Fichier indisponible."); return; }
-      const a = document.createElement("a"); a.href=src; a.download=f.name||f.fileName||"fichier"; a.click();
+      gcDownloadDoc({ id:f.id, serverUrl:f.serverUrl, url:f.url, dataUrl:f.dataUrl||f.fileData, nom:f.name||f.fileName, name:f.name||f.fileName });
       saveDossierFiles(prev=>prev.map(x=>x.id===f.id?{...x,downloads:(x.downloads||0)+1}:x));
     };
 
     const openFile = (f) => {
-      const src = f.dataUrl || f.fileData;
-      if (!src) { gcAlert("Fichier indisponible."); return; }
+      if (f.accessLevel > (localUser?.level || 0) && !isAdmin) { gcAlert("Accès refusé — Habilitation insuffisante."); return; }
       const mime = f.mimeType || f.fileMime || "";
-      if (mime === "application/pdf" || (f.ext||"").toLowerCase() === ".pdf") {
-        try { const blob=_dataUrlToBlob(src); const url=blob?URL.createObjectURL(blob):src; window.open(url,"_blank"); } catch(_) { window.open(src,"_blank"); }
-      } else if (mime.startsWith("image/") || [".jpg",".jpeg",".png",".gif",".webp"].includes((f.ext||"").toLowerCase())) {
+      if (mime.startsWith("image/") || [".jpg",".jpeg",".png",".gif",".webp"].includes((f.ext||"").toLowerCase())) {
         const i = thisDossierFiles.indexOf(f);
         setFileViewerIdx(i >= 0 ? i : 0);
       } else {
-        handleDownload(f);
+        gcViewDoc({ id:f.id, serverUrl:f.serverUrl, url:f.url, dataUrl:f.dataUrl||f.fileData, nom:f.name||f.fileName, name:f.name||f.fileName });
       }
     };
     return (

@@ -3,7 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // FinanceApp.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, dsOnSync, gcSyncAuthUsers, dsDeleteItemFromArray } from '../../core/index.js';
-import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT } from '../../core/constants.js';
+import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { CoverPage, CreateAccountPage, LoginPage } from '../../components/Auth.jsx';
 import { SignaturePINModal } from '../docs/DossiersList.jsx';
@@ -233,7 +233,8 @@ export function OHADARefApp({ T, currentUser, journalEntries=[], setJournalEntri
                   <span style={{fontSize:20}}>📄</span>
                   <div style={{flex:1,minWidth:0}}><div style={{color:T.text,fontSize:11,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</div><div style={{color:T.textMuted,fontSize:9}}>{d.type} · {d.size} · {d.uploadedAt?.slice(0,10)} · {d.uploadedBy}</div></div>
                   <span style={{background:"#C9A84C22",color:"#C9A84C",borderRadius:4,padding:"2px 7px",fontSize:9,fontWeight:700}}>{d.type}</span>
-                  {d.url&&<button onClick={()=>{const a=document.createElement("a");a.href=d.url;a.download=d.name;a.click();}} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontWeight:700,fontSize:10}}>⬇</button>}
+                  {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>gcViewDoc({id:d.id,serverUrl:d.serverUrl,url:d.url,dataUrl:d.dataUrl,nom:d.name,name:d.name})} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontWeight:700,fontSize:10}}>👁️ Voir</button>}
+                  {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>gcDownloadDoc({id:d.id,serverUrl:d.serverUrl,url:d.url,dataUrl:d.dataUrl,nom:d.name,name:d.name})} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontWeight:700,fontSize:10}}>⬇ DL</button>}
                   <button onClick={()=>saveDocs(uploadedDocs.filter(x=>x.id!==d.id))} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:12}}>🗑️</button>
                 </div>
               ))}
