@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // JuridiqueApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, playSound, useSI, gcFileSave , dsSave, dsOnSync, dsGet } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, playSound, useSI, gcFileSave , dsSave, dsGet } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
@@ -153,29 +153,7 @@ export function JuridiqueApp({ T, currentUser, setNotifications=_noop, dossiers=
     e.target.value = "";
   };
 
-  React.useEffect(() => {
-    const unsub = dsOnSync(async (event) => {
-      try {
-        if (event.key === 'gc-jur-docs') {
-          const val = await dsGet('gc-jur-docs', []);
-          if (Array.isArray(val)) { setUploadedDocs(val); try { _lsSet('gc-jur-docs', JSON.stringify(val)); } catch (_) {} }
-        }
-        if (event.key === 'gc-jur-custom-laws') {
-          const val = await dsGet('gc-jur-custom-laws', []);
-          if (Array.isArray(val)) { setCustomLaws(val); try { _lsSet('gc-jur-custom-laws', JSON.stringify(val)); } catch (_) {} }
-        }
-        if (event.key === 'gc-jur-custom-modeles') {
-          const val = await dsGet('gc-jur-custom-modeles', []);
-          if (Array.isArray(val)) { setCustomModeles(val); try { _lsSet('gc-jur-custom-modeles', JSON.stringify(val)); } catch (_) {} }
-        }
-        if (event.key === 'gc-jur-veille') {
-          const val = await dsGet('gc-jur-veille', []);
-          if (Array.isArray(val)) { setVeille(val); try { _lsSet('gc-jur-veille', JSON.stringify(val)); } catch (_) {} }
-        }
-      } catch (_) {}
-    });
-    return () => unsub();
-  }, []);
+  // Sync déjà géré par useRemoteSync à la ligne 80
 
   const handleVeilleFile = (e, veilleId) => {
     const files = Array.from(e.target.files||[]);

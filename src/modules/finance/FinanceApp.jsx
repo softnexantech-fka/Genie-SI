@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // FinanceApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, dsOnSync, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
@@ -377,68 +377,7 @@ export function FacturationModule({ T, currentUser, dossiers=[], partners=[], jo
     CONVERTI:  { l:"Converti",  c:"#8B5CF6", icon:"🔁" },
   };
 
-  // FIX v130 — Sync réseau en temps réel via dsOnSync (toutes les machines)
-  React.useEffect(() => {
-    const unsub = dsOnSync((event) => {
-      if (event.key === 'gc-factures') {
-        try {
-          const fresh = JSON.parse(_lsGet("gc-factures") || "[]");
-          setFactures(fresh);
-        } catch(_) {}
-      }
-    });
-    return () => unsub();
-  }, []);
-  React.useEffect(() => {
-    const unsub = dsOnSync((event) => {
-      if (event.key === 'gc-devis') {
-        try { setDevis(JSON.parse(_lsGet("gc-devis") || "[]")); } catch (_) {}
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  React.useEffect(() => {
-    const reload = () => {
-      try { setDevis(JSON.parse(_lsGet("gc-devis") || "[]")); } catch (_) {}
-    };
-    const onStorage = (e) => { if (e?.key === "gc-devis" || !e) reload(); };
-    window.addEventListener("storage", onStorage);
-    const poll = setInterval(reload, 10000);
-    reload();
-    return () => { window.removeEventListener("storage", onStorage); clearInterval(poll); };
-  }, []);
-
-  React.useEffect(() => {
-    const unsub = dsOnSync((event) => {
-      if (event.key === 'gc-ohada-docs') {
-        try { setUploadedDocs(JSON.parse(_lsGet('gc-ohada-docs') || '[]')); } catch (_) {}
-      }
-      if (event.key === 'gc-ohada-custom') {
-        try { setCustomComptes(JSON.parse(_lsGet('gc-ohada-custom') || '[]')); } catch (_) {}
-      }
-      if (event.key === 'gc-piece-series') {
-        try { setNumSeries(JSON.parse(_lsGet('gc-piece-series') || 'null') || {AC:{prefix:'AC',seq:1},VT:{prefix:'VT',seq:1},BQ:{prefix:'BQ',seq:1},PE:{prefix:'PE',seq:1},OD:{prefix:'OD',seq:1}}); } catch (_) {}
-      }
-    });
-    return () => unsub();
-  }, []);
-
-  // v111 — Sync temps réel gc-factures (storage event + polling 10s)
-  // Quand Finance écrit → GestionDocs recharge automatiquement et inversement
-  React.useEffect(() => {
-    const reload = () => {
-      try {
-        const fresh = JSON.parse(_lsGet("gc-factures") || "[]");
-        setFactures(fresh);
-      } catch(_) {}
-    };
-    const onStorage = (e) => { if (e?.key === "gc-factures" || !e) reload(); };
-    window.addEventListener("storage", onStorage);
-    const poll = setInterval(reload, 10000); // polling 10s si même onglet
-    reload(); // chargement initial frais
-    return () => { window.removeEventListener("storage", onStorage); clearInterval(poll); };
-  }, []);
+  // Sync déjà géré par useRemoteSync aux lignes 62-65 et 360-362
 
   // Calcul auto retards
   React.useEffect(() => {

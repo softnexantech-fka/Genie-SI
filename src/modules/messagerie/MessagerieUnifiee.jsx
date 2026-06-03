@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // MessagerieUnifiee.jsx — SI Génie Consultant v129
-import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, gcCodif, gcCodifMSG, gcFileSave, _activeUser, dsSave, dsOnSync, dsGet } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, gcPushNotif, playSound, gcCodif, gcCodifMSG, gcFileSave, _activeUser, dsSave, dsGet } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { useSyncedState } from '../../hooks/useSyncedState.js';
 import { INITIAL_COMMITTEES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, gcOpenPrintWindow } from '../../components/UI.jsx';
@@ -46,7 +47,11 @@ export function MessagerieUnifieeApp({ T, currentUser, users=[], setNotification
     dsSave('gc-messages-global', next.slice(0,500)).catch(err => gcToast.syncError('', err));
     return next;});},[]);
 
-  // FIX vMSG-SYNC — Charger les messages depuis le serveur au montage
+  const [courriers, setCourriers] = useState(()=>{try{return JSON.parse(_lsGet("gc-courrier-docs")||"[]");}catch (_) {return [];}});
+
+  useRemoteSync({ 'gc-messages-global': _setMessages, 'gc-courrier-docs': setCourriers });
+
+  // Chargement initial depuis le serveur
   useEffect(() => {
     dsGet('gc-messages-global', null).then(val => {
       if (val && Array.isArray(val) && val.length > 0) {
@@ -54,20 +59,13 @@ export function MessagerieUnifieeApp({ T, currentUser, users=[], setNotification
         try { _lsSet("gc-messages-global", JSON.stringify(val.slice(0, 500))); } catch (_) {}
       }
     }).catch(() => {});
-    // Écouter les changements en temps réel depuis les autres postes
-    const unsub = dsOnSync((event) => {
-      if (event.key !== 'gc-messages-global') return;
-      dsGet('gc-messages-global', null).then(val => {
-        if (val && Array.isArray(val)) {
-          _setMessages(val.slice(0, 500));
-          try { _lsSet("gc-messages-global", JSON.stringify(val.slice(0, 500))); } catch (_) {}
-        }
-      }).catch(() => {});
-    });
-    return unsub;
-   
+    dsGet('gc-courrier-docs', null).then(val => {
+      if (val && Array.isArray(val) && val.length > 0) {
+        setCourriers(val.slice(0, 100));
+        try { _lsSet("gc-courrier-docs", JSON.stringify(val.slice(0, 100))); } catch (_) {}
+      }
+    }).catch(() => {});
   }, []);
-  const [courriers, setCourriers] = useState(()=>{try{return JSON.parse(_lsGet("gc-courrier-docs")||"[]");}catch (_) {return [];}});
   const [selected, setSelected] = useState(null);
   const [compose, setCompose] = useState({to:[],cc:[],subject:"",body:"",attachments:[],type:"internal"});
   const [showEmojis, setShowEmojis] = useState(false);
@@ -214,6 +212,7 @@ export function MessagerieUnifieeApp({ T, currentUser, users=[], setNotification
     const updated = [doc,...courriers];
     setCourriers(updated);
     try{_lsSet("gc-courrier-docs",JSON.stringify(updated.slice(0,100)));}catch (_) {}
+    dsSave('gc-courrier-docs', updated.slice(0,100)).catch(()=>{});
     if(setNotifications) setNotifications(p=>[{id:"N"+Date.now(),icon:"📮",message:`Courrier envoyé: ${courForm.objet} — Réf: ${ref}`,at:now,read:false},...p]);
     setCourForm({destinataire:"",objet:"",ref:"",body:"",template:"",type:"external"});
     setView("courriers");
@@ -1041,6 +1040,7 @@ export function MessagerieUnifieeApp({ T, currentUser, users=[], setNotification
                       const updated=[doc,...courriers];
                       setCourriers(updated);
                       try{_lsSet("gc-courrier-docs",JSON.stringify(updated.slice(0,100)));}catch(_){}
+                      dsSave('gc-courrier-docs', updated.slice(0,100)).catch(()=>{});
                       if(setNotifications) setNotifications(p=>[{id:"N"+Date.now(),icon:"📮",message:`Courrier: ${courForm.objet} → ${courForm.destinataire}`,at:now,read:false},...p]);
                       setCourForm({destinataire:"",objet:"",ref:"",body:"",template:"",type:"external"});
                       setCourAttachments([]);
