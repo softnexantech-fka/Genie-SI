@@ -19,20 +19,25 @@
 3. [Architecture Système](#3-architecture-système)
 4. [Structure du Projet](#4-structure-du-projet)
 5. [Base de Données — Schéma Drizzle](#5-base-de-données--schéma-drizzle)
-6. [Authentification & RBAC](#6-authentification--rbac)
+6. [Authentification & RBAC Avancé](#6-authentification--rbac-avancé)
 7. [API — tRPC Routers](#7-api--trpc-routers)
 8. [Modules Fonctionnels](#8-modules-fonctionnels)
-9. [Panneau Admin Distance](#9-panneau-admin-distance)
-10. [Temps Réel — WebSocket](#10-temps-réel--websocket)
-11. [Gestion Fichiers](#11-gestion-fichiers)
-12. [UI/UX — Design System](#12-uiux--design-system)
-13. [Drag & Drop](#13-drag--drop)
-14. [Notifications & Alertes](#14-notifications--alertes)
-15. [Assistant IA Intégré](#15-assistant-ia-intégré)
-16. [Tests](#16-tests)
-17. [Déploiement & DevOps](#17-déploiement--devops)
-18. [Standards de Code](#18-standards-de-code)
-19. [Checklist de livraison](#19-checklist-de-livraison)
+9. [Système de Modules Dynamiques](#9-système-de-modules-dynamiques)
+10. [Wizard d'Onboarding](#10-wizard-donboarding)
+11. [Personnalisation — Admin Panel](#11-personnalisation--admin-panel)
+12. [Panneau Super-Admin Distant](#12-panneau-super-admin-distant)
+13. [Temps Réel — WebSocket](#13-temps-réel--websocket)
+14. [Gestion Fichiers](#14-gestion-fichiers)
+15. [UI/UX — Design System](#15-uiux--design-system)
+16. [Drag & Drop](#16-drag--drop)
+17. [Notifications & Alertes](#17-notifications--alertes)
+18. [Assistant IA Intégré](#18-assistant-ia-intégré)
+19. [Tests](#19-tests)
+20. [Déploiement & DevOps](#20-déploiement--devops)
+21. [React 19 — Patterns Modernes](#21-react-19--patterns-modernes-obligatoires)
+22. [Accessibilité](#22-patterns-daccessibilité-a11y--obligatoires)
+23. [Standards de Code](#23-standards-de-code)
+24. [Checklist de livraison](#24-checklist-de-livraison)
 
 ---
 
@@ -49,10 +54,14 @@ mais conçue spécifiquement pour les cabinets de conseil, PME et organisations 
 
 ### Principes fondamentaux
 - **Multi-tenant** : chaque organisation (tenant) a ses données totalement isolées
-- **Multi-rôle** : contrôle d'accès granulaire par processus, niveau et habilitation
-- **Temps réel** : synchronisation instantanée entre tous les postes connectés
-- **100% CRUD** : aucune donnée en lecture seule — tout est éditable, supprimable
-- **Modulaire** : chaque module peut être activé/désactivé par tenant
+- **Entièrement personnalisable** : modules, champs, workflows, UI, RBAC — tout est configurable sans toucher au code
+- **Wizard first-run** : à la première connexion, un assistant interactif configure l'organisation (modules choisis, branding, utilisateurs, processus)
+- **Système de modules dynamiques** : chaque module est un plugin activable/désactivable/renommable/fusionnable depuis les paramètres admin
+- **Champs personnalisés** : chaque entité (dossier, tâche, contact...) accepte des champs additionnels définis par l'admin (texte, nombre, date, liste, relation)
+- **RBAC granulaire** : rôles entièrement configurables — pas de niveaux rigides codés en dur ; héritage, surcharge et permissions par ressource
+- **Multi-rôle** : contrôle d'accès par rôle, par processus, par habilitation individuelle et par ressource
+- **Temps réel** : synchronisation instantanée — toute modification config (activation module, changement thème, nouveau rôle) se propage sans rechargement
+- **100% CRUD** : aucune donnée en lecture seule — tout est éditable, supprimable, archivable
 - **Admin distant** : panneau de super-administration accessible hors réseau client
 - **Production-ready** : sécurité, performance, observabilité, déploiement Docker
 
@@ -465,7 +474,315 @@ pnpm db:studio     # Drizzle Studio UI
 
 ---
 
-## 6. Authentification & RBAC
+## 6. Authentification & RBAC Avancé
+
+### RBAC Complet — Architecture
+
+Le système d'accès est **entièrement configurable par tenant** depuis le panneau admin.
+Il n'existe pas de niveaux rigides codés en dur dans le frontend. Tout est piloté
+par la base de données et invalidé en temps réel via Redis.
+
+#### Modèle de données RBAC
+
+```typescript
+// packages/db/schema/rbac.ts
+
+// Un "rôle" est une collection nommée de permissions, créé par l'admin tenant
+export const roles = pgTable('roles', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),             // 'Directeur', 'Juriste', 'Comptable', 'Stagiaire'...
+  description: text('description'),
+  color: text('color').default('#6366F1'),  // Couleur affichée dans l'UI
+  icon: text('icon').default('Shield'),     // Nom icône Lucide
+  level: integer('level').default(1),       // 1-6 (ordre hiérarchique interne, non rigide)
+  parentRoleId: text('parent_role_id'),     // Héritage : hérite de toutes les perms du parent
+  isDefault: boolean('is_default').default(false),  // Rôle attribué aux nouveaux users
+  isSystem: boolean('is_system').default(false),     // Rôle système non supprimable (Admin, Owner)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+})
+
+// Les permissions sont des triplets : action sur ressource dans module
+// Granularité totale : create/read/read_own/update/update_own/delete/delete_own/archive/export/admin
+export const permissions = pgTable('permissions', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  moduleId: text('module_id').notNull(),      // 'dossiers', 'finance', 'sirh', 'juridique'...
+  resource: text('resource').notNull(),        // 'dossier', 'invoice', 'employee', '*'
+  action: text('action', {
+    enum: [
+      'create',       // Créer une nouvelle entrée
+      'read',         // Lire toutes les entrées du module
+      'read_own',     // Lire uniquement ses propres entrées
+      'update',       // Modifier toutes les entrées
+      'update_own',   // Modifier uniquement ses propres entrées
+      'delete',       // Supprimer toutes les entrées
+      'delete_own',   // Supprimer uniquement ses propres entrées
+      'archive',      // Archiver des entrées
+      'export',       // Exporter (CSV, PDF)
+      'share',        // Partager avec d'autres utilisateurs
+      'approve',      // Valider/approuver (workflows)
+      'admin',        // Toutes les actions + configuration du module
+    ]
+  }).notNull(),
+  conditions: jsonb('conditions').$type<PermissionConditions>().default({}).notNull(),
+  // conditions = { onlyOwnProcess: true, maxAmount: 1000000, onlyStatus: ['brouillon'] }
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+// Attribution de rôles aux utilisateurs (N rôles par user, hors modules)
+export const userRoles = pgTable('user_roles', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  roleId: text('role_id').notNull().references(() => roles.id, { onDelete: 'cascade' }),
+  grantedById: text('granted_by_id').references(() => users.id),
+  expiresAt: timestamp('expires_at'),         // Rôle temporaire (ex: remplacement)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+// Habilitations individuelles sur un module ou une ressource spécifique
+// Surcharge ou affine les permissions du rôle pour un user donné
+export const userHabilitations = pgTable('user_habilitations', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id),
+  moduleId: text('module_id').notNull(),
+  resource: text('resource').notNull(),
+  action: text('action').notNull(),
+  effect: text('effect', { enum: ['allow', 'deny'] }).notNull(),  // deny = surcharge bloquante
+  resourceId: text('resource_id'),           // Sur une ressource spécifique (ex: dossier XYZ)
+  grantedById: text('granted_by_id').references(() => users.id),
+  expiresAt: timestamp('expires_at'),
+  reason: text('reason'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+// Codes d'accès provisoires (accès temporaire à un module sans rôle permanent)
+export const accessCodes = pgTable('access_codes', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  code: text('code').notNull(),              // Code unique alphanumérique
+  moduleId: text('module_id').notNull(),
+  maxUses: integer('max_uses').default(1),
+  usedCount: integer('used_count').default(0),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdById: text('created_by_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+type PermissionConditions = {
+  onlyOwnProcess?: boolean        // Ne voit que les ressources de son processus
+  onlyOwnEntries?: boolean        // Ne voit que ce qu'il a créé
+  maxAmount?: number              // Finance : montant max qu'il peut valider
+  allowedStatuses?: string[]      // Seulement les ressources dans ces statuts
+  requireApproval?: boolean       // Ses actions nécessitent une validation
+  ipWhitelist?: string[]          // Restreindre à certaines IP LAN
+}
+```
+
+#### Moteur de vérification d'accès — checkPermission()
+
+```typescript
+// packages/api/lib/rbac.ts
+// TOUTES les mutations et queries passent par cette fonction.
+// Ne jamais vérifier manuellement user.level dans les routers.
+
+import { cache } from 'react'
+import type { User, Permission } from '@nexadesk/db'
+
+export type PermissionAction =
+  | 'create' | 'read' | 'read_own' | 'update' | 'update_own'
+  | 'delete' | 'delete_own' | 'archive' | 'export' | 'share'
+  | 'approve' | 'admin'
+
+export interface AccessContext {
+  userId: string
+  tenantId: string
+  moduleId: string
+  action: PermissionAction
+  resource?: string
+  resourceId?: string           // Pour vérifier la propriété (own vs all)
+  resourceOwnerId?: string      // createdById de la ressource cible
+  resourceData?: Record<string, unknown>  // Pour vérifier les conditions
+}
+
+export async function checkPermission(
+  ctx: AccessContext,
+  db: DrizzleDb,
+  redis: Redis
+): Promise<{ allowed: boolean; reason?: string }> {
+  const cacheKey = `rbac:${ctx.tenantId}:${ctx.userId}:${ctx.moduleId}:${ctx.action}`
+
+  // 1. Cache Redis (TTL 30s) pour éviter N+1 queries sur chaque requête
+  const cached = await redis.get(cacheKey)
+  if (cached) return JSON.parse(cached)
+
+  // 2. Vérifier si le tenant a ce module activé
+  const tenantModules = await getTenantModules(ctx.tenantId, db, redis)
+  if (!tenantModules.includes(ctx.moduleId)) {
+    return cache_and_return(redis, cacheKey, { allowed: false, reason: 'module_disabled' })
+  }
+
+  // 3. Récupérer tous les rôles + permissions de l'utilisateur
+  const userRoles = await getUserRolesWithPermissions(ctx.userId, ctx.tenantId, db)
+
+  // 4. Construire l'ensemble des permissions effectives (avec héritage de rôles)
+  const effectivePerms = await resolveEffectivePermissions(userRoles, ctx.moduleId)
+
+  // 5. Vérifier les habilitations individuelles (surcharge DENY en priorité max)
+  const habilitations = await getUserHabilitations(ctx.userId, ctx.tenantId, ctx.moduleId, db)
+  const denyHab = habilitations.find(h =>
+    h.effect === 'deny' &&
+    (h.action === ctx.action || h.action === '*') &&
+    (!h.resourceId || h.resourceId === ctx.resourceId)
+  )
+  if (denyHab) {
+    return cache_and_return(redis, cacheKey, { allowed: false, reason: 'explicit_deny' })
+  }
+
+  const allowHab = habilitations.find(h =>
+    h.effect === 'allow' &&
+    (h.action === ctx.action || h.action === '*')
+  )
+  if (allowHab) {
+    return cache_and_return(redis, cacheKey, { allowed: true, reason: 'habilitation' })
+  }
+
+  // 6. Chercher une permission directe ou via action 'own' + propriété
+  const directPerm = effectivePerms.find(p =>
+    p.action === ctx.action || p.action === 'admin'
+  )
+  if (directPerm) {
+    const condOk = evaluateConditions(directPerm.conditions, ctx)
+    return cache_and_return(redis, cacheKey, { allowed: condOk, reason: condOk ? 'role_perm' : 'condition_failed' })
+  }
+
+  // 7. Tenter la variante 'own' (ex: demande update mais n'a que update_own)
+  const ownVariant = `${ctx.action}_own` as PermissionAction
+  const ownPerm = effectivePerms.find(p => p.action === ownVariant)
+  if (ownPerm && ctx.resourceOwnerId === ctx.userId) {
+    const condOk = evaluateConditions(ownPerm.conditions, ctx)
+    return cache_and_return(redis, cacheKey, { allowed: condOk, reason: 'own_perm' })
+  }
+
+  return cache_and_return(redis, cacheKey, { allowed: false, reason: 'no_permission' })
+}
+
+// Invalider le cache RBAC d'un user quand ses rôles changent
+export async function invalidateUserRbacCache(userId: string, tenantId: string, redis: Redis) {
+  const keys = await redis.keys(`rbac:${tenantId}:${userId}:*`)
+  if (keys.length > 0) await redis.del(...keys)
+}
+
+// Invalider tout le cache RBAC d'un tenant (ex: modification d'un rôle)
+export async function invalidateTenantRbacCache(tenantId: string, redis: Redis) {
+  const keys = await redis.keys(`rbac:${tenantId}:*`)
+  if (keys.length > 0) await redis.del(...keys)
+}
+```
+
+#### Utilisation dans les tRPC routers
+
+```typescript
+// Middleware tRPC réutilisable
+const requirePermission = (moduleId: string, action: PermissionAction) =>
+  t.middleware(async ({ ctx, next, input }) => {
+    const { allowed, reason } = await checkPermission(
+      {
+        userId: ctx.user.id,
+        tenantId: ctx.tenantId,
+        moduleId,
+        action,
+        resourceId: (input as { id?: string })?.id,
+        resourceOwnerId: (input as { createdById?: string })?.createdById,
+      },
+      ctx.db,
+      ctx.redis
+    )
+    if (!allowed) throw new TRPCError({ code: 'FORBIDDEN', message: reason })
+    return next()
+  })
+
+// Usage dans un router :
+export const dossiersRouter = router({
+  list:   protectedProcedure.use(requirePermission('dossiers', 'read')).query(...),
+  create: protectedProcedure.use(requirePermission('dossiers', 'create')).mutation(...),
+  update: protectedProcedure.use(requirePermission('dossiers', 'update')).mutation(...),
+  delete: protectedProcedure.use(requirePermission('dossiers', 'delete')).mutation(...),
+  export: protectedProcedure.use(requirePermission('dossiers', 'export')).mutation(...),
+  approve:protectedProcedure.use(requirePermission('dossiers', 'approve')).mutation(...),
+})
+```
+
+#### Rôles système par défaut (seed initial)
+
+```typescript
+// packages/db/seed/rbac.ts
+// Ces rôles sont créés automatiquement à l'onboarding — modifiables ensuite
+
+export const DEFAULT_ROLES = [
+  {
+    name: 'Propriétaire',
+    level: 6,
+    isSystem: true,
+    description: 'Accès total — propriétaire de l\'organisation',
+    permissions: [{ moduleId: '*', resource: '*', action: 'admin' }],
+  },
+  {
+    name: 'Administrateur',
+    level: 5,
+    isSystem: true,
+    description: 'Administration SI — gestion comptes, modules, configuration',
+    permissions: [{ moduleId: '*', resource: '*', action: 'admin' }],
+  },
+  {
+    name: 'Direction',
+    level: 4,
+    description: 'Vision globale — lecture tous modules, validation finale',
+    permissions: [
+      { moduleId: '*', resource: '*', action: 'read' },
+      { moduleId: '*', resource: '*', action: 'approve' },
+      { moduleId: '*', resource: '*', action: 'export' },
+    ],
+  },
+  {
+    name: 'Responsable',
+    level: 3,
+    description: 'Gestion complète de son département',
+    permissions: [
+      { moduleId: '*', resource: '*', action: 'read' },
+      { moduleId: '*', resource: '*', action: 'create' },
+      { moduleId: '*', resource: '*', action: 'update' },
+      { moduleId: '*', resource: '*', action: 'delete_own' },
+      { moduleId: '*', resource: '*', action: 'archive' },
+    ],
+  },
+  {
+    name: 'Collaborateur',
+    level: 2,
+    isDefault: true,
+    description: 'Accès à son processus — création et modification propres entrées',
+    permissions: [
+      { moduleId: '*', resource: '*', action: 'read_own' },
+      { moduleId: '*', resource: '*', action: 'create' },
+      { moduleId: '*', resource: '*', action: 'update_own' },
+    ],
+  },
+  {
+    name: 'Observateur',
+    level: 1,
+    description: 'Lecture seule sur les modules autorisés',
+    permissions: [
+      { moduleId: '*', resource: '*', action: 'read_own' },
+    ],
+  },
+] as const
+// L'admin peut créer des rôles additionnels : 'Juriste', 'Comptable', 'Auditeur', etc.
+// avec des permissions exactement calibrées pour son organisation
+```
 
 ### Better Auth Configuration
 
@@ -1057,7 +1374,783 @@ Pour chacun, appliquer le même niveau de détail que les modules précédents :
 
 ---
 
-## 9. Panneau Admin Distant
+## 9. Système de Modules Dynamiques
+
+### Principe
+
+Chaque module de l'application est un **plugin enregistré**, jamais hardcodé dans la
+navigation ou le routing. L'admin peut activer, désactiver, renommer, réordonner,
+fusionner ou même créer de nouveaux modules sans modifier le code source.
+Un module désactivé n'apparaît nulle part dans l'UI — ni dans la sidebar, ni dans
+les permissions, ni dans les rapports. Sa désactivation est propagée en temps réel
+à tous les postes via Redis pub/sub + WebSocket.
+
+### Schéma DB — Registre des modules
+
+```typescript
+// packages/db/schema/modules.ts
+
+// Catalogue de tous les modules disponibles sur la plateforme
+export const moduleRegistry = pgTable('module_registry', {
+  id: text('id').primaryKey(),               // Identifiant stable : 'dossiers', 'finance'...
+  slug: text('slug').notNull().unique(),      // URL-safe : 'dossiers', 'finance', 'legal'
+  defaultLabel: text('default_label').notNull(),   // Label par défaut (FR)
+  defaultIcon: text('default_icon').notNull(),     // Nom icône Lucide : 'FolderKanban'
+  defaultColor: text('default_color').notNull(),   // '#6366F1'
+  category: text('category', {
+    enum: ['core', 'metier', 'support', 'admin', 'custom']
+  }).notNull(),
+  description: text('description'),
+  dependencies: text('dependencies').array().default([]),  // Modules requis avant activation
+  incompatible: text('incompatible').array().default([]),  // Modules mutuellement exclusifs
+  isMergeable: boolean('is_mergeable').default(true),      // Peut être fusionné avec un autre
+  isRemovable: boolean('is_removable').default(true),      // Peut être désactivé
+  version: text('version').default('1.0.0').notNull(),
+  componentPath: text('component_path').notNull(),         // Import dynamique React
+  routerPath: text('router_path').notNull(),               // tRPC router à monter
+})
+
+// Configuration du module par tenant (personnalisation complète)
+export const tenantModules = pgTable('tenant_modules', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  moduleId: text('module_id').notNull().references(() => moduleRegistry.id),
+
+  // Personnalisation affichage
+  label: text('label'),             // Surcharge du label : 'Juridique' → 'Pôle Legal'
+  icon: text('icon'),               // Surcharge icône Lucide
+  color: text('color'),             // Surcharge couleur
+  description: text('description'), // Texte affiché dans le menu et les accès refusés
+
+  // État
+  isEnabled: boolean('is_enabled').default(true).notNull(),
+  position: integer('position').default(0).notNull(),  // Ordre sidebar (drag & drop)
+
+  // Fusion de modules : juridique + conformite → 'Legal & Compliance'
+  mergedInto: text('merged_into'),        // moduleId cible si ce module est fusionné
+  isMergeTarget: boolean('is_merge_target').default(false), // Ce module accueille la fusion
+
+  // Config spécifique au module (features flags internes)
+  config: jsonb('config').$type<ModuleConfig>().default({}).notNull(),
+  /*
+  ModuleConfig exemples :
+  - dossiers  : { enableKanban: true, enableGantt: false, maxAttachmentMB: 50 }
+  - finance   : { currency: 'XAF', taxRate: 18, enableOHADA: true, enableDevis: true }
+  - sirh      : { enablePayroll: true, enableLeaves: true, leaveApprovalLevels: 2 }
+  - juridique : { enableOHADA: true, enableContracts: true, enableLitiges: false }
+  */
+
+  // Qui peut accéder : liste de roleIds OU processus OU '*' (tous avec rôle)
+  allowedRoles: text('allowed_roles').array().default([]).notNull(),
+  allowedProcesses: text('allowed_processes').array().default([]).notNull(),
+  isStrictAccess: boolean('is_strict_access').default(false), // Bloque codes provisoires
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  uniq: unique().on(t.tenantId, t.moduleId),
+}))
+
+// Champs personnalisés ajoutés à une entité par le tenant
+export const customFields = pgTable('custom_fields', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  moduleId: text('module_id').notNull(),
+  entityType: text('entity_type').notNull(),  // 'dossier', 'task', 'employee', 'invoice'...
+  name: text('name').notNull(),               // Slug interne : 'numero_tribunal'
+  label: text('label').notNull(),             // Affiché : 'N° Tribunal'
+  type: text('type', {
+    enum: ['text','textarea','number','currency','date','datetime','boolean',
+           'select','multiselect','relation','file','url','email','phone','richtext']
+  }).notNull(),
+  options: jsonb('options').$type<CustomFieldOptions>().default({}).notNull(),
+  /*
+  options selon type :
+  - select/multiselect : { choices: [{value, label, color}] }
+  - relation           : { targetModule: 'partners', displayField: 'name' }
+  - number/currency    : { min, max, decimals, prefix, suffix }
+  - text               : { maxLength, pattern, placeholder }
+  */
+  isRequired: boolean('is_required').default(false),
+  isSearchable: boolean('is_searchable').default(false),
+  isFilterable: boolean('is_filterable').default(false),
+  showInList: boolean('show_in_list').default(false),  // Colonne visible dans la liste
+  showInCard: boolean('show_in_card').default(false),  // Visible sur les cards
+  position: integer('position').default(0),
+  section: text('section').default('Informations complémentaires'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+})
+
+// Valeurs des champs personnalisés
+export const customFieldValues = pgTable('custom_field_values', {
+  id: text('id').primaryKey().$defaultFn(() => generateId()),
+  tenantId: text('tenant_id').notNull().references(() => organizations.id),
+  fieldId: text('field_id').notNull().references(() => customFields.id, { onDelete: 'cascade' }),
+  entityId: text('entity_id').notNull(),  // ID de la ressource (dossier, tâche, etc.)
+  value: jsonb('value'),                  // Valeur sérialisée (string|number|string[]|...)
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (t) => ({
+  uniq: unique().on(t.fieldId, t.entityId),
+}))
+```
+
+### Routing dynamique des modules
+
+```typescript
+// apps/web/lib/modules/module-loader.ts
+// Chaque module est chargé dynamiquement — seuls les modules activés sont bundlés
+
+import { lazy } from 'react'
+import type { TenantModule } from '@nexadesk/db'
+
+// Registre statique des composants disponibles
+const MODULE_COMPONENTS: Record<string, () => Promise<{ default: React.ComponentType }>> = {
+  dossiers:       () => import('@/components/modules/dossiers'),
+  tasks:          () => import('@/components/modules/tasks'),
+  finance:        () => import('@/components/modules/finance'),
+  juridique:      () => import('@/components/modules/juridique'),
+  sirh:           () => import('@/components/modules/sirh'),
+  audit:          () => import('@/components/modules/audit'),
+  conformite:     () => import('@/components/modules/conformite'),
+  conseil:        () => import('@/components/modules/conseil'),
+  communication:  () => import('@/components/modules/communication'),
+  logistique:     () => import('@/components/modules/logistique'),
+  messagerie:     () => import('@/components/modules/messagerie'),
+  agenda:         () => import('@/components/modules/agenda'),
+  rapports:       () => import('@/components/modules/rapports'),
+  // Modules fusionnés (combinaisons fréquentes)
+  'juridique+conformite': () => import('@/components/modules/legal-compliance'),
+  'audit+conformite':     () => import('@/components/modules/audit-compliance'),
+}
+
+export function getModuleComponent(moduleId: string) {
+  // Gère les fusions : si juridique est fusionné dans un target, charger le composant combiné
+  const loader = MODULE_COMPONENTS[moduleId]
+  if (!loader) throw new Error(`Module '${moduleId}' not found in registry`)
+  return lazy(loader)
+}
+
+// Hook côté client pour accéder aux modules actifs du tenant
+// apps/web/lib/hooks/use-modules.ts
+export function useEnabledModules() {
+  const { data: modules } = trpc.tenant.getEnabledModules.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,   // 5 min — rarement change
+  })
+  return modules ?? []
+}
+
+// Navigation sidebar générée dynamiquement
+export function useSidebarNavigation() {
+  const modules = useEnabledModules()
+  const { data: permissions } = trpc.permissions.myPermissions.useQuery()
+
+  return useMemo(() =>
+    modules
+      .filter(m => permissions?.canAccessModule(m.moduleId))
+      .sort((a, b) => a.position - b.position)
+      .map(m => ({
+        href:   `/dashboard/${m.slug}`,
+        label:  m.label ?? m.defaultLabel,
+        icon:   m.icon  ?? m.defaultIcon,   // Nom icône Lucide résolu dynamiquement
+        color:  m.color ?? m.defaultColor,
+        badge:  getBadgeCount(m.moduleId),
+      })),
+    [modules, permissions]
+  )
+}
+```
+
+### Module fusion — "Legal & Compliance"
+
+```typescript
+// Quand l'admin fusionne juridique + conformite :
+// 1. tenantModules.juridique  → mergedInto = 'legal_compliance'
+// 2. tenantModules.conformite → mergedInto = 'legal_compliance'
+// 3. tenantModules crée une entrée  { moduleId: 'legal_compliance', isMergeTarget: true }
+// 4. Le routing /dashboard/legal_compliance charge le composant combiné
+// 5. Les permissions RBAC existantes sont préservées (les deux modules comptent)
+// 6. Dans la sidebar, une seule entrée "Legal & Compliance" apparaît
+// 7. L'URL /dashboard/juridique redirige vers /dashboard/legal_compliance
+
+// Le composant fusionné est un layout avec onglets :
+// <Tabs>
+//   <TabsList>
+//     <TabsTrigger value="juridique">Juridique</TabsTrigger>
+//     <TabsTrigger value="conformite">Conformité</TabsTrigger>
+//   </TabsList>
+//   <TabsContent value="juridique"><JuridiqueModule /></TabsContent>
+//   <TabsContent value="conformite"><ConformiteModule /></TabsContent>
+// </Tabs>
+```
+
+---
+
+## 10. Wizard d'Onboarding
+
+### Principe
+
+À la **première connexion** d'un nouveau tenant (après création du compte), un wizard
+interactif en plusieurs étapes guide l'administrateur pour configurer son organisation.
+Le wizard ne peut pas être skippé. Une fois terminé, il ne se réaffiche pas (sauf reset
+depuis les paramètres admin). Chaque réponse est sauvegardée en DB dès validation de l'étape.
+
+### Schéma DB
+
+```typescript
+// packages/db/schema/onboarding.ts
+export const onboardingState = pgTable('onboarding_state', {
+  tenantId: text('tenant_id').primaryKey().references(() => organizations.id),
+  completed: boolean('completed').default(false).notNull(),
+  currentStep: integer('current_step').default(1).notNull(),
+  completedSteps: integer('completed_steps').array().default([]).notNull(),
+  responses: jsonb('responses').$type<OnboardingResponses>().default({}).notNull(),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+})
+
+type OnboardingResponses = {
+  organization?:  OrganizationSetup
+  modules?:       ModulesSetup
+  branding?:      BrandingSetup
+  processes?:     ProcessesSetup
+  users?:         UsersSetup
+  roles?:         RolesSetup
+}
+```
+
+### Étapes du wizard (7 étapes)
+
+```typescript
+// apps/web/app/onboarding/page.tsx — SERVER COMPONENT
+// apps/web/components/onboarding/wizard.tsx — CLIENT COMPONENT
+
+const ONBOARDING_STEPS: OnboardingStep[] = [
+  // ── ÉTAPE 1 : Informations organisation ─────────────────────────
+  {
+    id: 1,
+    title: 'Votre organisation',
+    description: 'Ces informations apparaîtront sur vos documents officiels',
+    icon: 'Building2',   // Lucide
+    fields: [
+      { name: 'name',           label: 'Nom de l\'organisation',   type: 'text',     required: true },
+      { name: 'legalName',      label: 'Raison sociale',           type: 'text',     required: false },
+      { name: 'type',           label: 'Type d\'organisation',     type: 'select',
+        options: [
+          { value: 'cabinet_conseil',  label: 'Cabinet de conseil' },
+          { value: 'pme',              label: 'PME / Entreprise' },
+          { value: 'ngo',              label: 'ONG / Association' },
+          { value: 'administration',   label: 'Administration publique' },
+          { value: 'autre',            label: 'Autre' },
+        ]
+      },
+      { name: 'country',        label: 'Pays',                     type: 'country-select', default: 'GA' },
+      { name: 'city',           label: 'Ville',                    type: 'text' },
+      { name: 'address',        label: 'Adresse',                  type: 'textarea' },
+      { name: 'phone',          label: 'Téléphone',                type: 'phone' },
+      { name: 'email',          label: 'Email',                    type: 'email' },
+      { name: 'website',        label: 'Site web',                 type: 'url',      required: false },
+      { name: 'taxId',          label: 'Numéro fiscal / RCCM',     type: 'text',     required: false },
+      { name: 'currency',       label: 'Devise principale',        type: 'select',
+        options: [
+          { value: 'XAF', label: 'Franc CFA (XAF)' },
+          { value: 'EUR', label: 'Euro (EUR)' },
+          { value: 'USD', label: 'Dollar US (USD)' },
+          { value: 'GNF', label: 'Franc Guinéen (GNF)' },
+          { value: 'XOF', label: 'Franc CFA UEMOA (XOF)' },
+        ],
+        default: 'XAF'
+      },
+      { name: 'timezone',       label: 'Fuseau horaire',           type: 'timezone-select', default: 'Africa/Libreville' },
+      { name: 'language',       label: 'Langue de l\'interface',   type: 'select',
+        options: [{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }],
+        default: 'fr'
+      },
+      { name: 'logo',           label: 'Logo (facultatif)',        type: 'file-upload', accept: 'image/*' },
+    ],
+  },
+
+  // ── ÉTAPE 2 : Sélection des modules ─────────────────────────────
+  {
+    id: 2,
+    title: 'Vos modules métier',
+    description: 'Sélectionnez les modules dont vous avez besoin. Vous pourrez en ajouter ou en retirer à tout moment.',
+    icon: 'LayoutGrid',
+    // Affichage en grille de cards avec icône Lucide, description et toggle
+    // Groupés par catégorie : Pilotage, Opérationnel, Support
+    // Certains modules sont liés (ex: activer Finance suggère d'activer Logistique)
+    moduleGroups: [
+      {
+        label: 'Pilotage & Stratégie',
+        modules: [
+          { id: 'conseil',        label: 'Conseil & Stratégie',        icon: 'Target',       default: true },
+          { id: 'audit',          label: 'Audit & Contrôle',           icon: 'ShieldCheck',  default: false },
+          { id: 'conformite',     label: 'Conformité',                  icon: 'ShieldAlert',  default: false },
+          { id: 'rapports',       label: 'Rapports d\'activité',        icon: 'BarChart3',    default: true },
+        ]
+      },
+      {
+        label: 'Gestion Opérationnelle',
+        modules: [
+          { id: 'dossiers',       label: 'Dossiers & Documents',       icon: 'FolderKanban', default: true },
+          { id: 'tasks',          label: 'Tâches & Projets',           icon: 'CheckSquare',  default: true },
+          { id: 'juridique',      label: 'Juridique & OHADA',          icon: 'Scale',        default: false },
+          { id: 'agenda',         label: 'Agenda & Planification',     icon: 'CalendarDays', default: true },
+        ]
+      },
+      {
+        label: 'Support & Ressources',
+        modules: [
+          { id: 'finance',        label: 'Finance & Comptabilité',     icon: 'DollarSign',   default: false },
+          { id: 'sirh',           label: 'Ressources Humaines (SIRH)', icon: 'Users',        default: false },
+          { id: 'logistique',     label: 'Logistique & Achats',        icon: 'Truck',        default: false },
+          { id: 'communication',  label: 'Communication & Marketing',  icon: 'Megaphone',    default: false },
+          { id: 'messagerie',     label: 'Messagerie Interne',         icon: 'MessageSquare',default: true },
+        ]
+      },
+    ],
+    // Option de fusion suggérée
+    mergeSuggestions: [
+      {
+        modules: ['juridique', 'conformite'],
+        label: 'Fusionner en "Legal & Compliance"',
+        description: 'Regroupe Juridique et Conformité dans un seul espace',
+      },
+      {
+        modules: ['audit', 'conformite'],
+        label: 'Fusionner en "Audit & Conformité"',
+        description: 'Pour les cabinets axés audit réglementaire',
+      },
+    ],
+  },
+
+  // ── ÉTAPE 3 : Branding & Thème ──────────────────────────────────
+  {
+    id: 3,
+    title: 'Apparence & Branding',
+    description: 'Personnalisez l\'interface aux couleurs de votre organisation',
+    icon: 'Palette',
+    fields: [
+      {
+        name: 'primaryColor',
+        label: 'Couleur principale',
+        type: 'color-picker',
+        default: '#0A1E4A',
+        description: 'Utilisée pour la sidebar, les boutons principaux et les en-têtes'
+      },
+      {
+        name: 'accentColor',
+        label: 'Couleur d\'accent',
+        type: 'color-picker',
+        default: '#C9A84C',
+        description: 'Pour les badges, highlights et éléments de focus'
+      },
+      {
+        name: 'theme',
+        label: 'Thème de base',
+        type: 'theme-selector',
+        options: [
+          { value: 'dark',   label: 'Sombre',         preview: 'bg-slate-950' },
+          { value: 'light',  label: 'Clair',          preview: 'bg-white' },
+          { value: 'system', label: 'Selon le système', preview: 'bg-gradient-to-r from-slate-950 to-white' },
+        ],
+        default: 'dark'
+      },
+      {
+        name: 'borderRadius',
+        label: 'Style des composants',
+        type: 'select',
+        options: [
+          { value: '0',    label: 'Angulaire (0px)' },
+          { value: '4px',  label: 'Légèrement arrondi (4px)' },
+          { value: '8px',  label: 'Arrondi (8px) — recommandé' },
+          { value: '12px', label: 'Très arrondi (12px)' },
+        ],
+        default: '8px'
+      },
+      {
+        name: 'fontFamily',
+        label: 'Police de caractères',
+        type: 'select',
+        options: [
+          { value: 'Inter',        label: 'Inter — Moderne, lisible' },
+          { value: 'DM Sans',      label: 'DM Sans — Épuré, professionnel' },
+          { value: 'Plus Jakarta', label: 'Plus Jakarta Sans — Élégant' },
+          { value: 'Geist',        label: 'Geist — Tech, contemporain' },
+        ],
+        default: 'Inter'
+      },
+      { name: 'appName', label: 'Nom de l\'application (affiché)', type: 'text', default: '' },
+      { name: 'favicon', label: 'Favicon (optionnel)', type: 'file-upload', accept: '.ico,.png,.svg' },
+    ],
+    // Prévisualisation live en temps réel à droite du formulaire
+    livePreview: true,
+  },
+
+  // ── ÉTAPE 4 : Structure organisationnelle ────────────────────────
+  {
+    id: 4,
+    title: 'Processus & Départements',
+    description: 'Définissez la structure de votre organisation. Vous pourrez la modifier ensuite.',
+    icon: 'Network',
+    // Affichage dynamique : soit utiliser les processus GC prédéfinis,
+    // soit créer une structure personnalisée
+    mode: 'choice',
+    choices: [
+      {
+        value: 'gc_standard',
+        label: 'Structure Génie Consultant (recommandée)',
+        description: 'P01–P04 Pilotage, O01–O03 Opérationnel, S01–S06 Support',
+        presets: 'GC_PROCESS_PRESETS',
+      },
+      {
+        value: 'custom',
+        label: 'Structure personnalisée',
+        description: 'Créez vos propres départements et processus',
+      },
+    ],
+    // En mode custom : interface drag & drop pour créer des processus/départements
+    // avec nom, couleur, modules associés
+  },
+
+  // ── ÉTAPE 5 : Premier utilisateur admin ─────────────────────────
+  {
+    id: 5,
+    title: 'Votre compte administrateur',
+    description: 'Configurez le compte principal de l\'administrateur SI',
+    icon: 'UserCog',
+    autoFilled: true,  // Pré-remplit avec le compte de création
+    fields: [
+      { name: 'adminName',     label: 'Nom complet',    type: 'text',  required: true },
+      { name: 'adminEmail',    label: 'Email',          type: 'email', required: true, readonly: true },
+      { name: 'adminPhone',    label: 'Téléphone',      type: 'phone' },
+      { name: 'adminFonction', label: 'Fonction',       type: 'text' },
+    ],
+  },
+
+  // ── ÉTAPE 6 : Inviter des collaborateurs ────────────────────────
+  {
+    id: 6,
+    title: 'Inviter votre équipe',
+    description: 'Vous pouvez inviter des collaborateurs maintenant ou le faire plus tard',
+    icon: 'UserPlus',
+    optional: true,  // Peut être skippée
+    // Interface d'invitation par email en masse :
+    // - Saisie emails (un par ligne ou CSV)
+    // - Attribution rôle par défaut
+    // - Attribution processus
+    // - Envoi email d'invitation avec lien d'activation
+    // Message : "Vous pourrez gérer les accès en détail depuis les Paramètres"
+  },
+
+  // ── ÉTAPE 7 : Récapitulatif & Lancement ─────────────────────────
+  {
+    id: 7,
+    title: 'Votre espace est prêt',
+    description: 'Récapitulatif de la configuration',
+    icon: 'CheckCircle2',
+    // Affiche un résumé de tous les choix + CTA "Accéder à mon tableau de bord"
+    // Animation de célébration (Framer Motion — pas d'emoji, animation SVG)
+    // Option "Visiter la documentation" et "Voir la vidéo de démarrage"
+  },
+]
+```
+
+### tRPC Router onboarding
+
+```typescript
+// packages/api/routers/onboarding.ts
+export const onboardingRouter = router({
+  getState: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.db.query.onboardingState.findFirst({
+      where: eq(onboardingState.tenantId, ctx.tenantId),
+    })
+  }),
+
+  saveStep: protectedProcedure
+    .input(z.object({
+      step: z.number().min(1).max(7),
+      data: z.record(z.unknown()),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      if (!isAdmin(ctx.user)) throw new TRPCError({ code: 'FORBIDDEN' })
+
+      // Sauvegarder les réponses et appliquer les effets de l'étape
+      await applyOnboardingStep(ctx, input.step, input.data)
+
+      await ctx.db.insert(onboardingState)
+        .values({ tenantId: ctx.tenantId, currentStep: input.step + 1, completedSteps: [input.step] })
+        .onConflictDoUpdate({
+          target: onboardingState.tenantId,
+          set: {
+            currentStep: input.step + 1,
+            completedSteps: sql`array_append(completed_steps, ${input.step})`,
+            responses: sql`responses || ${JSON.stringify({ [`step${input.step}`]: input.data })}::jsonb`,
+          }
+        })
+    }),
+
+  complete: protectedProcedure.mutation(async ({ ctx }) => {
+    if (!isAdmin(ctx.user)) throw new TRPCError({ code: 'FORBIDDEN' })
+    await ctx.db.update(onboardingState)
+      .set({ completed: true, completedAt: new Date() })
+      .where(eq(onboardingState.tenantId, ctx.tenantId))
+
+    // Broadcaster aux autres onglets ouverts
+    await emitToTenant(ctx.tenantId, 'onboarding:complete', {})
+    revalidatePath('/')
+  }),
+})
+```
+
+---
+
+## 11. Personnalisation — Admin Panel
+
+### Vue d'ensemble
+
+Le panneau d'administration du **tenant** (pas le super-admin) est accessible depuis
+`/dashboard/settings`. Il est distinct du super-admin distant. Il permet à l'administrateur
+de l'organisation de personnaliser **intégralement** l'application sans toucher au code.
+Toute modification est **immédiatement propagée** à tous les postes via WebSocket.
+
+### Sections du panneau admin tenant
+
+```
+/settings/
+├── general/              Infos organisation, branding, thème
+├── modules/              Activer/désactiver/renommer/fusionner/réordonner les modules
+├── custom-fields/        Champs personnalisés par module et entité
+├── workflows/            Workflows de validation configurables
+├── roles/                Gestion des rôles RBAC
+├── permissions/          Permissions granulaires par rôle et module
+├── users/                Gestion des utilisateurs, rôles, invitation
+├── processes/            Départements et processus métier
+├── notifications/        Règles de notification par événement
+├── email-templates/      Templates emails transactionnels (Tiptap editor)
+├── integrations/         Webhooks, API keys, intégrations tierces
+├── audit-log/            Journal d'audit (lecture seule)
+└── danger-zone/          Reset onboarding, export data, supprimer organisation
+```
+
+### 11.1 Gestionnaire de Modules
+
+```typescript
+// apps/web/components/settings/modules/module-manager.tsx
+// Interface complète de gestion des modules
+
+// Fonctionnalités :
+// - Liste des modules disponibles avec état (actif/inactif)
+// - Drag & drop pour réordonner la sidebar
+// - Toggle rapide (switch) avec confirmation si désactivation a un impact
+// - Édition inline : renommer le label, changer l'icône (picker Lucide), changer la couleur
+// - Bouton "Configurer" : ouvre un panneau de config spécifique au module
+// - Bouton "Fusionner" : sélectionner un autre module et créer l'entrée fusionnée
+// - Section "Créer un module personnalisé" pour les cas avancés
+
+// Composant IconPicker — sélectionne une icône Lucide
+// Affiche une grille searchable de toutes les icônes Lucide disponibles
+// Input de recherche par nom : "folder", "shield", "chart"...
+// Prévisualisation en temps réel sur le module card
+
+type ModuleManagerProps = {
+  modules: TenantModule[]
+  onToggle: (moduleId: string, enabled: boolean) => Promise<void>
+  onRename: (moduleId: string, label: string) => Promise<void>
+  onReorder: (orderedIds: string[]) => Promise<void>
+  onChangeIcon: (moduleId: string, icon: string) => Promise<void>
+  onMerge: (sourceId: string, targetId: string, mergedLabel: string) => Promise<void>
+  onConfigure: (moduleId: string) => void
+}
+```
+
+### 11.2 Gestionnaire de Champs Personnalisés
+
+```typescript
+// apps/web/components/settings/custom-fields/field-builder.tsx
+// Interface drag & drop pour créer et ordonner des champs personnalisés
+
+// Pour chaque module activé, l'admin peut :
+// - Ajouter des champs à n'importe quelle entité (dossier, tâche, facture, employé...)
+// - Définir le type (texte, nombre, date, liste déroulante, multi-sélection, relation, fichier)
+// - Définir les options (pour les listes : valeurs, couleurs, icônes par choix)
+// - Définir les validations (required, min, max, pattern regex)
+// - Choisir où le champ apparaît (liste, card, formulaire, détail, export)
+// - Ordonner par drag & drop
+// - Grouper dans des sections
+
+// Les champs personnalisés sont automatiquement :
+// - Intégrés dans les formulaires de création/édition (React Hook Form dynamic fields)
+// - Filtrables dans les listes (si isFilterable: true)
+// - Exportables (CSV, PDF)
+// - Indexés pour la recherche (si isSearchable: true)
+
+// Composant dynamique pour rendre les champs custom dans les formulaires :
+function CustomFieldsSection({ entityType, entityId, moduleId, mode }: CustomFieldSectionProps) {
+  const { data: fields } = trpc.customFields.list.useQuery({ entityType, moduleId })
+  const { data: values } = trpc.customFieldValues.get.useQuery({ entityId })
+
+  return (
+    <div className="space-y-4">
+      {fields?.sections.map(section => (
+        <fieldset key={section.name} className="rounded-lg border p-4">
+          <legend className="px-2 text-sm font-semibold text-muted-foreground">
+            {section.name}
+          </legend>
+          <div className="grid gap-3">
+            {section.fields.map(field => (
+              <DynamicField
+                key={field.id}
+                field={field}
+                value={values?.[field.id]}
+                mode={mode}   // 'edit' | 'view' | 'filter'
+              />
+            ))}
+          </div>
+        </fieldset>
+      ))}
+    </div>
+  )
+}
+```
+
+### 11.3 Configurateur de Workflows
+
+```typescript
+// apps/web/components/settings/workflows/workflow-builder.tsx
+// Builder drag & drop d'étapes de validation
+
+// L'admin peut configurer pour chaque module/entité un workflow de validation :
+// - Nombre d'étapes (1 à N)
+// - Pour chaque étape : rôle requis, processus requis, conditions (ex: si montant > 1M)
+// - Notifications automatiques lors des transitions
+// - Délais et relances automatiques
+// - Actions bloquantes vs informatives
+
+type WorkflowStep = {
+  id: string
+  label: string              // 'Validation Responsable', 'Approbation DG'
+  order: number
+  approverType: 'role' | 'process' | 'specific_user' | 'any'
+  approverValue: string      // roleId | processId | userId | '*'
+  conditions: WorkflowCondition[]
+  /*
+  WorkflowCondition exemples :
+  { field: 'amount', operator: '>', value: 1000000 }  → étape requise seulement si montant > 1M XAF
+  { field: 'priority', operator: '=', value: 'critical' }
+  { field: 'category', operator: 'in', value: ['contrat', 'mandat'] }
+  */
+  isMandatory: boolean
+  timeoutHours?: number      // Relance auto si pas de validation après N heures
+  timeoutAction?: 'escalate' | 'auto_approve' | 'auto_reject'
+  notifyOnEnter?: string[]   // roleIds à notifier quand l'étape devient active
+  requiredDocuments?: string[] // Documents à joindre obligatoirement
+}
+
+// Affichage visuel : pipeline horizontal avec flèches entre les étapes
+// Chaque étape est une card draggable (réordonner = changer l'ordre de validation)
+```
+
+### 11.4 Gestionnaire de Rôles & Permissions
+
+```typescript
+// apps/web/components/settings/roles/role-manager.tsx
+// Interface complète RBAC visuelle
+
+// Structure de l'interface :
+// Panneau gauche : liste des rôles (drag pour réordonner hiérarchie)
+// Panneau droit : permissions du rôle sélectionné
+
+// Tableau des permissions par module :
+// ┌──────────────┬────────┬──────────┬────────┬────────┬─────────┬────────┬─────────┐
+// │  Module      │ Créer  │ Lire     │Modifier│Supprimer│Archiver │Exporter│Approuver│
+// ├──────────────┼────────┼──────────┼────────┼─────────┼─────────┼────────┼─────────┤
+// │ Dossiers     │ [x]    │ Tous[x]  │ Prop[x]│   [ ]   │   [x]   │  [ ]   │   [ ]   │
+// │ Finance      │ [ ]    │ Prop[x]  │ Prop[x]│   [ ]   │   [ ]   │  [ ]   │   [ ]   │
+// │ ...          │        │          │        │         │         │        │         │
+// └──────────────┴────────┴──────────┴────────┴─────────┴─────────┴────────┴─────────┘
+// Chaque cellule peut être : [ ] refusé | [O] propres entrées seulement | [X] toutes les entrées
+// Survol cellule = tooltip expliquant l'effet
+// Bouton "Conditions avancées" par cellule pour ajouter des conditions (montant, statut...)
+
+// Héritage de rôle : sélecteur "Ce rôle hérite de" → visualisation des permissions héritées vs ajoutées
+```
+
+### 11.5 Thème & Branding Live
+
+```typescript
+// apps/web/components/settings/appearance/theme-editor.tsx
+// Éditeur de thème avec prévisualisation live côté droit
+
+// Couleurs configurables via color picker :
+// - primaryColor    → sidebar bg, boutons principaux, liens actifs
+// - accentColor     → badges, highlights, progress bars
+// - successColor    → statuts "validé", "payé", "terminé"
+// - warningColor    → statuts "en attente", "en retard"
+// - dangerColor     → statuts "rejeté", "critique", boutons destructifs
+
+// La modification est appliquée en live sur la prévisualisation :
+// - CSS custom properties injectées dans :root
+// - Propagée via WebSocket à tous les postes connectés
+// - Sauvegardée en DB dans organizations.settings.theme
+
+// Import/export de thème (JSON) pour réutilisation entre tenants
+
+// Variables CSS propagées dynamiquement
+function applyTenantTheme(settings: OrgSettings) {
+  const root = document.documentElement
+  root.style.setProperty('--primary-h',      extractHSL(settings.primaryColor).h.toString())
+  root.style.setProperty('--primary-s',      extractHSL(settings.primaryColor).s + '%')
+  root.style.setProperty('--primary-l',      extractHSL(settings.primaryColor).l + '%')
+  root.style.setProperty('--accent-h',       extractHSL(settings.accentColor).h.toString())
+  // ... toutes les variables
+  root.setAttribute('data-theme', settings.theme)
+  root.setAttribute('data-radius', settings.borderRadius)
+  root.style.setProperty('--font-sans', `'${settings.fontFamily}', system-ui, sans-serif`)
+}
+```
+
+### 11.6 Propagation temps réel des modifications admin
+
+```typescript
+// Toute modification dans les paramètres admin est broadcastée immédiatement
+// à tous les utilisateurs connectés du tenant
+
+// packages/api/services/settings.service.ts
+export async function updateTenantSetting(
+  tenantId: string,
+  key: string,
+  value: unknown,
+  io: Server
+) {
+  await db.update(organizations)
+    .set({ settings: sql`settings || ${JSON.stringify({ [key]: value })}::jsonb`, updatedAt: new Date() })
+    .where(eq(organizations.id, tenantId))
+
+  // Invalider le cache
+  await redis.del(`tenant:settings:${tenantId}`)
+
+  // Propager à tous les clients connectés du tenant
+  io.to(`tenant:${tenantId}`).emit('settings:updated', { key, value })
+}
+
+// Côté client — écouter les changements settings
+socket.on('settings:updated', ({ key, value }) => {
+  queryClient.setQueryData(['tenant', 'settings'], (old) => ({ ...old, [key]: value }))
+
+  // Appliquer immédiatement si c'est un changement visuel
+  if (key === 'theme' || key === 'primaryColor' || key === 'accentColor') {
+    applyTenantTheme({ ...currentSettings, [key]: value })
+  }
+  if (key === 'enabledModules') {
+    // Invalider la navigation pour masquer/afficher les modules
+    queryClient.invalidateQueries({ queryKey: ['tenant', 'modules'] })
+  }
+})
+```
+
+---
+
+## 12. Panneau Super-Admin Distant
 
 L'application `apps/admin/` est une **application Next.js distincte** déployée séparément,
 accessible uniquement par les super-administrateurs depuis n'importe quel endroit.
