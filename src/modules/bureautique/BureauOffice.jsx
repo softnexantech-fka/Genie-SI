@@ -496,26 +496,26 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
     // Budget Rapide déplacé dans ToolsWidget (topbar) — plus accessible, outil quotidien
 
     // ── APPLICATIONS MÉTIER — Accès contrôlé par processus/habilitation ──
+    // Référence : matrice Accréditation de Processus (screenshots validés par admin)
     { id:"docs_app",     icon:"📁", label:"Gestionnaire Docs",       desc:"Parcourir, consulter et archiver dossiers & documents",
-      color:"#6366F1", group:"metier", processes:[], minLevel:1 },
+      color:"#6366F1", group:"metier", processes:["P01","P04","O01","O02"], minLevel:2 },
     { id:"juridique",    icon:"⚖️", label:"Juridique & OHADA",       desc:"Droit des affaires, OHADA, contrats, modèles juridiques",
-      color:"#DC2626", group:"metier", processes:["O02","P02"], minLevel:2 },
+      color:"#DC2626", group:"metier", processes:["P01","O02"], minLevel:2 },
     { id:"audit",        icon:"🔍", label:"Audit & Contrôle",        desc:"Risques, matrices ISA/COSO, checklists, rapports d'audit",
-      color:"#C41E3A", group:"metier", processes:["S02","O03"], minLevel:2 },
+      color:"#C41E3A", group:"metier", processes:["P01","P02","O03","S02"], minLevel:2 },
     { id:"finance",      icon:"💰", label:"Finance & Comptabilité",  desc:"Journal comptable, budget, TVA, fiscalité, bilan",
-      color:"#C9A84C", group:"metier", processes:["P01","P02","S01"], minLevel:2, strictBlock:true },
-      // FIX v150 — Finance strictement réservé P01 (Management), P02 (Gouvernance) et S01 (Finance).
-      // strictBlock:true = accès entièrement bloqué sans code ni habilitation possible hors processus autorisés.
+      color:"#C9A84C", group:"metier", processes:["P01","P03","S01"], minLevel:2, strictBlock:true },
+      // strictBlock:true = bloquage total hors processus autorisés, aucun code provisoire accepté.
     { id:"conseil",      icon:"🎯", label:"Conseil & Stratégie",     desc:"SWOT, PESTEL, matrices stratégiques, plans d'action",
-      color:"#0EA5E9", group:"metier", processes:["P01","P02","P03","P04","O03"], minLevel:3 },
+      color:"#0EA5E9", group:"metier", processes:["P01","P02","P03","P04"], minLevel:3 },
     { id:"sirh",         icon:"👥", label:"SIRH — Ressources Humaines", desc:"Présences, congés, recrutements, paie, registre du personnel — Module complet",
-      color:"#EA580C", group:"metier", processes:["S03"], minLevel:2 },
+      color:"#EA580C", group:"metier", processes:["P01","S03"], minLevel:2 },
     { id:"conformite",   icon:"🛡️", label:"Conformité & Réglementations",desc:"OHADA, droit gabonais, conformité, alertes réglementaires",
-      color:"#10B981", group:"metier", processes:["P02","S02"], minLevel:2 },
+      color:"#10B981", group:"metier", processes:["P01","P02","S02"], minLevel:2 },
     { id:"communication",icon:"📢", label:"Communication & Marketing",desc:"Communication externe, réseaux sociaux, plans marketing",
-      color:"#EC4899", group:"metier", processes:["S04"], minLevel:2 },
+      color:"#EC4899", group:"metier", processes:["P01","S04"], minLevel:2 },
     { id:"logistique",   icon:"🚚", label:"Logistique & Moyens Généraux",desc:"Achats, stocks, équipements, maintenance — Module complet",
-      color:"#78716C", group:"metier", processes:["S05","S06"], minLevel:1 },
+      color:"#78716C", group:"metier", processes:["P01","P03","S01","S05"], minLevel:1 },
     // rapport_activite déplacé dans sidebar (entre Tâches et Demandes)
     // Facturation supprimée ici — accessible uniquement depuis Finance & Comptabilité (S01)
   ], []);

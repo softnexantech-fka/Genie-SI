@@ -1743,8 +1743,8 @@ export const PROCESS_APP_MATRIX_DEFAULT = {
   "S04": ["bureau","communication","indicateurs","agenda_app"],
   "S05": ["bureau","logistique","indicateurs","agenda_app"],
   "S06": ["bureau","indicateurs","agenda_app"],
-  // ── ALL : clé globale pour accès universel (réservé admin/DG) ────────────
-  "ALL": ["bureau","finance","juridique","sirh","audit","conformite","logistique","communication","indicateurs","conseil","docs_app","conventions","agenda_app","admin"],
+  // "ALL" retiré : la clé globale accordait un accès "global" à tous les utilisateurs
+  // sans distinction de processus. Les admins/DG (level>=5) bypassent via le check isAdmin.
 };
 
 export const PROCESS_APP_TYPES = {
