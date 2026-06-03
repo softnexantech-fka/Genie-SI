@@ -11,14 +11,15 @@ export function BudgetRapideApp({ T, currentUser, setNotifications=_noop }){
   const gcConfirm = (msg, title, icon, danger) => _dlg.confirm(msg, title, icon, danger);
   const gcPrompt  = (msg, def, title, icon) => _dlg.prompt(msg, def, title, icon);
 
-  const [entrees, setEntrees] = useState(()=>{try{return JSON.parse(_lsGet("gc-budget-rapide")||"[]");}catch (_) {return [];}});
+  const _budgetKey = `gc-budget-rapide:${currentUser?.id||'default'}`;
+  const [entrees, setEntrees] = useState(()=>{try{return JSON.parse(_lsGet(_budgetKey)||_lsGet("gc-budget-rapide")||"[]");}catch (_) {return [];}});
   const [form, setForm] = useState({label:"",montant:"",type:"DEPENSE",categorie:"Autre",date:new Date().toISOString().slice(0,10),notes:""});
   const [filter, setFilter] = useState("all");
   const CATS_DEPENSES=["Fournitures","Transport","Repas","Loyer","Services","Salaires","Impôts","Autre"];
   const CATS_ENTREES=["Honoraires","Prestation","Subvention","Remboursement","Autre"];
-  useRemoteSync({'gc-budget-rapide': setEntrees});
+  useRemoteSync({[_budgetKey]: setEntrees});
 
-  const save=d=>{setEntrees(d);try{const trimmed=d.slice(0,500);_lsSet("gc-budget-rapide",JSON.stringify(trimmed));dsSave("gc-budget-rapide",trimmed).catch(()=>{});}catch (_) {}};
+  const save=d=>{setEntrees(d);try{const trimmed=d.slice(0,500);_lsSet(_budgetKey,JSON.stringify(trimmed));dsSave(_budgetKey,trimmed).catch(()=>{});}catch (_) {}};
   const addEntry=()=>{
     if(!form.label||!form.montant){gcAlert("Libellé et montant requis.");return;}
     const e={id:"BR"+Date.now(),...form,montant:parseFloat(form.montant)||0,createdBy:currentUser?.name,createdAt:new Date().toISOString()};

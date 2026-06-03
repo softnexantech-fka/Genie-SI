@@ -39,7 +39,8 @@ export function WriterProApp({ T, currentUser, setNotifications=_noop}){
   const YEAR = new Date().getFullYear();
 
   // ── State ─────────────────────────────────────────────────────────────────
-  const [docs, setDocs] = React.useState(()=>{try{return JSON.parse(_lsGet("gc-writer-pro-v2")||"[]");}catch(_){return [];}});
+  const _writerKey = `gc-writer-pro-v2:${currentUser?.id||'default'}`;
+  const [docs, setDocs] = React.useState(()=>{try{return JSON.parse(_lsGet(_writerKey)||_lsGet("gc-writer-pro-v2")||"[]");}catch(_){return [];}});
   const [current, setCurrent] = React.useState(null);
   const [title, setTitle] = React.useState("Document sans titre");
   const [savedMsg, setSavedMsg] = React.useState(false);
@@ -83,14 +84,14 @@ export function WriterProApp({ T, currentUser, setNotifications=_noop}){
   const FONT_SIZES = [8,9,10,11,12,13,14,16,18,20,22,24,26,28,32,36,40,48,56,64,72,96];
 
   // ── Document ops ──────────────────────────────────────────────────────────
-  useRemoteSync({'gc-writer-pro-v2': setDocs});
+  useRemoteSync({[_writerKey]: setDocs});
 
   const saveDocs = d => {
     setDocs(d);
     try{
       const trimmed = d.slice(0,50).map(x=>({...x,content:x.content?.slice(0,100000)}));
-      _lsSet("gc-writer-pro-v2",JSON.stringify(trimmed));
-      dsSave("gc-writer-pro-v2", trimmed).catch(()=>{});
+      _lsSet(_writerKey,JSON.stringify(trimmed));
+      dsSave(_writerKey, trimmed).catch(()=>{});
     }catch(_){}
   };
 

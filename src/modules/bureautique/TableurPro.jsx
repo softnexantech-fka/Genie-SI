@@ -24,8 +24,9 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
   const mkEmpty = (nc=DEF_COLS) => Array.from({length:ROWS},()=>mkRow(nc));
 
   // ── State ──────────────────────────────────────────────────────────────────
+  const _tableurKey = `gc-tableur-pro:${currentUser?.id||'default'}`;
   const [sheets, setSheets] = React.useState(()=>{
-    try{const s=JSON.parse(_lsGet("gc-tableur-pro")||"null");
+    try{const s=JSON.parse(_lsGet(_tableurKey)||_lsGet("gc-tableur-pro")||"null");
       return s||[{id:"s1",name:"Feuil1",data:mkEmpty(),colW:{},rowH:{},merges:[],conds:[],namedRanges:{}},
                  {id:"s2",name:"Feuil2",data:mkEmpty(),colW:{},rowH:{},merges:[],conds:[],namedRanges:{}}];}
     catch(_){return [{id:"s1",name:"Feuil1",data:mkEmpty(),colW:{},rowH:{},merges:[],conds:[],namedRanges:{}}];}
@@ -75,13 +76,13 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
   const inputRef = React.useRef(null);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  useRemoteSync({'gc-tableur-pro': setSheets});
+  useRemoteSync({[_tableurKey]: setSheets});
   const saveSheets = (s) => {
     setSheets(s);
     try{
       const trimmed = s.map(sh=>({...sh,data:sh.data.map(row=>row.map(c=>c.v||c.formula||c.bold||c.italic||c.bg||c.color||c.fmt?c:{v:""}))}));
-      _lsSet("gc-tableur-pro",JSON.stringify(trimmed));
-      dsSave("gc-tableur-pro",trimmed).catch(()=>{});
+      _lsSet(_tableurKey,JSON.stringify(trimmed));
+      dsSave(_tableurKey,trimmed).catch(()=>{});
     }catch(_){}
   };
   const pushUndo = (snapshot) => {

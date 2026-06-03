@@ -53,7 +53,8 @@ export function PresentationApp({ T, currentUser, setNotifications=_noop }){
   ];
   const ANIMATIONS = ["none","fadeIn","slideInLeft","slideInUp","zoomIn","bounceIn"];
 
-  const [decks, setDecks] = React.useState(()=>{ try{return JSON.parse(_lsGet("gc-pres-decks-v2")||"null")||[];}catch(_){return[];} });
+  const _presKey = `gc-pres-decks-v2:${currentUser?.id||'default'}`;
+  const [decks, setDecks] = React.useState(()=>{ try{return JSON.parse(_lsGet(_presKey)||_lsGet("gc-pres-decks-v2")||"null")||[];}catch(_){return[];} });
   const [activeDeck, setActiveDeck] = React.useState(null);
   const [activeSlide, setActiveSlide] = React.useState(0);
   const [presenting, setPresenting] = React.useState(false);
@@ -72,8 +73,8 @@ export function PresentationApp({ T, currentUser, setNotifications=_noop }){
   const timerRef = React.useRef(null);
   const presRef = React.useRef(null);
 
-  useRemoteSync({'gc-pres-decks-v2': setDecks});
-  const saveDecks = (d) => { setDecks(d); try{_lsSet("gc-pres-decks-v2",JSON.stringify(d)); dsSave("gc-pres-decks-v2",d).catch(()=>{});}catch(_){} };
+  useRemoteSync({[_presKey]: setDecks});
+  const saveDecks = (d) => { setDecks(d); try{_lsSet(_presKey,JSON.stringify(d)); dsSave(_presKey,d).catch(()=>{});}catch(_){} };
   const deck = decks.find(d=>d.id===activeDeck);
   const slides = deck?.slides||[];
   const slide = slides[activeSlide];
