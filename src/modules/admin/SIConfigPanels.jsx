@@ -26,6 +26,7 @@ import {
   playSound, gcGetDelaiConfig, gcLoadFiscalConfig,
   dsSave, gcSyncAuthUsers,
 } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { GC_FISCAL_CONFIG_DEFAULT } from '../../core/constants.js';
 
@@ -139,6 +140,7 @@ export function DelaiConfigPanelO01({ T, currentUser, lvl, isAdmin, setNotificat
 
   const [delaiCfg, setDelaiCfg] = React.useState(() => gcGetDelaiConfig());
   const [saved,    setSaved]    = React.useState(false);
+  useRemoteSync({ 'gc-delai-config': setDelaiCfg });
 
   const PROCS = { O01:'Administration',O02:'Juridique',O03:'Éval. & Gestion',S01:'Finance',S02:'Audit',S03:'RH',S04:'Communication',S05:'Logistique',S06:'Entretien',P01:'Management',P02:'Gouvernance',P03:'Contrôle gestion',P04:'Veille' };
 
@@ -267,6 +269,7 @@ export function FiscalConfigPanel({ T, currentUser }) {
   const [cfg,      setCfg]      = React.useState(() => gcLoadFiscalConfig());
   const [saved,    setSaved]    = React.useState(false);
   const [showIRPP, setShowIRPP] = React.useState(false);
+  useRemoteSync({ 'gc-fiscal-config': setCfg });
 
   const save = () => {
     try {

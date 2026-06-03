@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // TachesPanel.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, gcPushNotif, playSound, formatDate, generateAccessCode, useSI, _activeUser, formatDateTime, getUser, daysLeft, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { STATUS_CONFIG, PRIORITY_CONFIG, INITIAL_SESSION_LOGS } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
@@ -79,7 +80,9 @@ export function TachesPanel() {
   });
   const [siAlertFilter, setSiAlertFilter] = useState("ALL");
   const [siAlertSearch, setSiAlertSearch] = useState("");
-  const [selectedAlerts, setSelectedAlerts] = useState([]); // multi-select for alertes
+  const [selectedAlerts, setSelectedAlerts] = useState([]);
+
+  useRemoteSync({ 'gc-security-alerts': setSiAlerts });
 
   const _myProcs = localUser.processes || [localUser.process];
   const myTaches = localUser.level >= 4 || (localUser?.isAdmin || localUser?.level >= 6)

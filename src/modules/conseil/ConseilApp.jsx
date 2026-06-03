@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // ConseilApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, _noop, gcCopy, _activeUser, gcAIAsk, dsSave, dsOnSync, dsGet } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, _noop, gcCopy, _activeUser, gcAIAsk, dsSave } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, ProgressBar} from '../../components/UI.jsx';
 
@@ -200,20 +200,7 @@ const [selUser, setSelUser] = React.useState("");
 const [opForm, setOpForm] = React.useState({critere:"COMPETENCES",note:5,avis:"",recommandation:"",forces:"",axes:""});
 const [aiOp, setAiOp] = React.useState(false);
 const saveOp = d=>{setOpinions(d);try{_lsSet("gc-conseil-opinions",JSON.stringify(d)); dsSave("gc-conseil-opinions", d).catch(()=>{});}catch(_){}};
-React.useEffect(() => {
-  const unsub = dsOnSync(async (event) => {
-    if (event.key === 'gc-conseil-opinions') {
-      try {
-        const val = await dsGet('gc-conseil-opinions', []);
-        if (Array.isArray(val)) {
-          setOpinions(val);
-          try { _lsSet('gc-conseil-opinions', JSON.stringify(val)); } catch (_) {}
-        }
-      } catch (_) {}
-    }
-  });
-  return () => unsub();
-}, []);
+useRemoteSync({'gc-conseil-opinions': setOpinions});
 const CRITERES = [{k:"COMPETENCES",l:"🧠 Compétences"},{k:"PERFORMANCE",l:"📈 Performance"},{k:"LEADERSHIP",l:"👑 Leadership"},{k:"COLLABORATION",l:"🤝 Collaboration"},{k:"INNOVATION",l:"💡 Innovation"},{k:"ENGAGEMENT",l:"🔥 Engagement"}];
 const activeUsers = users.filter(u=>_activeUser(u)&&u.level>0&&u.id!==currentUser?.id);
 return (

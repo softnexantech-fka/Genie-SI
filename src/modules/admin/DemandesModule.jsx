@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // DemandesModule.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, playSound, formatDate, _activeUser, formatDateTime, dsSave, dsOnSync, gcPushNotif, gcFileSave, gcViewDoc } from '../../core/index.js';
+import { _lsGet, _lsSet, _noop, playSound, formatDate, _activeUser, formatDateTime, dsSave, gcPushNotif, gcFileSave, gcViewDoc } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { CODES, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
@@ -31,18 +32,7 @@ export function DemandesModule({ currentUser, users=[], dossiers=[], T, setNotif
     saveDemandes(resolved);
   };
 
-  // FIX vDEM-SYNC — Écouter les changements temps réel depuis les autres postes
-  useEffect(() => {
-    const unsub = dsOnSync((event) => {
-      if (event.key !== 'gc-demandes') return;
-      try {
-        const fresh = JSON.parse(_lsGet("gc-demandes") || "[]");
-        setDemandesRaw(fresh);
-      } catch (_) {}
-    });
-    return unsub;
-   
-  }, []);
+  useRemoteSync({ 'gc-demandes': setDemandesRaw });
 
   const [tab, setTab] = useState(isManager ? "recues" : "soumettre");
   const [showForm, setShowForm] = useState(false);

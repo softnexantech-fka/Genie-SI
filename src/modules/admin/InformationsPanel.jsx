@@ -3,6 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // InformationsPanel.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, playSound, gcFileSave, _activeUser, formatDateTime, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { USER_FUNCTIONS, FILE_TYPE_CONFIG, INITIAL_SESSION_LOGS } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge} from '../../components/UI.jsx';
 
@@ -1195,6 +1196,7 @@ export function CabinetInfoConfig({ T, currentUser, addSessionLog }) {
       return defaultCabinetInfo;
     }
   });
+  useRemoteSync({ 'gc-cabinet-info': setCabinetInfo });
 
   const [saved, setSaved] = useState(false);
 

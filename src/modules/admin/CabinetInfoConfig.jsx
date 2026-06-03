@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 import { _lsGet, _lsSet, _noop , dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { Btn, InputField } from '../../components/UI.jsx';
 
@@ -33,6 +34,7 @@ export function CabinetInfoConfig({ T, currentUser, addSessionLog }) {
       return defaultCabinetInfo;
     }
   });
+  useRemoteSync({ 'gc-cabinet-info': setCabinetInfo });
 
   const [saved, setSaved] = useState(false);
 

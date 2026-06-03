@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // HubPanels.jsx — SI Génie Consultant v141
 import { _lsGet, _lsSet, _noop, playSound, getUserProcess, formatDateTime, LS_KEY, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { PROCESS_ACTIVITIES, PROCESS_APP_MATRIX_DEFAULT, PROCESS_APP_TYPES } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
@@ -178,6 +179,7 @@ export function ProcessAppMatrixAdmin({ T, currentUser }) {
   const [matrix, setMatrix] = useState(() => { try { return JSON.parse(_lsGet("gc-process-app-matrix")||"null") || PROCESS_APP_MATRIX_DEFAULT; } catch (_) { return PROCESS_APP_MATRIX_DEFAULT; } });
   const [matrixLog, setMatrixLog] = useState(() => { try { return JSON.parse(_lsGet("gc-matrix-log")||"[]"); } catch (_) { return []; } });
   const [view, setView] = useState("matrix");
+  useRemoteSync({ 'gc-process-app-matrix': setMatrix, 'gc-matrix-log': setMatrixLog });
 
   const APP_COLS = [
     {id:"bureau",l:"Bureau",icon:"💼"},
