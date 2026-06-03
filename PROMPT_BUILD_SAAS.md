@@ -62,24 +62,30 @@ mais conçue spécifiquement pour les cabinets de conseil, PME et organisations 
 
 ### Frontend
 ```
-Framework      : Next.js 15 (App Router, Server Components, Server Actions)
-Langage        : TypeScript 5.5 — strict mode, zéro `any`
-Styles         : Tailwind CSS v4 + CSS Variables
-Composants     : shadcn/ui (Radix UI primitives) + composants custom
-State global   : Zustand 5 (slices pattern)
-Server state   : TanStack Query v5 (React Query)
-Formulaires    : React Hook Form v7 + Zod resolvers
-Drag & Drop    : @dnd-kit/core + @dnd-kit/sortable + @dnd-kit/utilities
-Graphiques     : Recharts 2 + Tremor (dashboards)
-Tables         : TanStack Table v8 (virtualisée)
-Éditeur texte  : Tiptap 2 (ProseMirror)
-Éditeur code   : Monaco Editor
-Animations     : Framer Motion 11
-Icônes         : Lucide React + Radix Icons
-Date/Heure     : date-fns v3
-PDF            : @react-pdf/renderer
-QR Code        : react-qr-code
-Uploads        : UploadThing v7
+Framework      : Next.js 15.3+ (App Router, PPR, Server Components, Server Actions)
+React          : React 19 — use(), useOptimistic, useFormStatus, useActionState,
+                 Streaming SSR, Parallel Routes, Intercepting Routes, Metadata API
+Langage        : TypeScript 5.5 — strict mode, zéro `any`, noUncheckedIndexedAccess
+Styles         : Tailwind CSS v4 + CSS Variables pour thèmes (zéro px hardcodé)
+Composants     : shadcn/ui v2 (Radix UI primitives + Tailwind) + design system custom
+State global   : Zustand 5 — slices pattern, persist middleware, devtools
+Server state   : TanStack Query v5 — prefetch SSR, optimistic updates, infinite queries
+Formulaires    : React Hook Form v7 + Zod resolvers + useActionState (Server Actions)
+Drag & Drop    : @dnd-kit/core + @dnd-kit/sortable + @dnd-kit/utilities + @dnd-kit/modifiers
+Graphiques     : Recharts 2 + Tremor v3 (KPI cards, sparklines, dashboards)
+Tables         : TanStack Table v8 — virtual rows, column pinning, multi-sort
+Éditeur texte  : Tiptap 2 (ProseMirror) — mentions, tables, images, markdown import/export
+Éditeur code   : Monaco Editor — pour templates, formules, config avancée
+Animations     : Framer Motion 11 — layout animations, shared element transitions
+Icônes         : Lucide React v0.469+ (primaire, strokeWidth uniforme 1.75)
+                 @radix-ui/react-icons (secondaire, Radix UI composants natifs)
+                 SVG inline optimisé SVGO (illustrations, états vides, logos)
+                 INTERDIT : emojis Unicode, images PNG/JPG pour icônes
+Date/Heure     : date-fns v3 + date-fns-tz (fuseaux horaires Afrique)
+PDF            : @react-pdf/renderer v3 (factures, rapports, exports)
+QR Code        : react-qr-code (badges, accès rapide)
+Uploads        : UploadThing v7 (S3-compatible, chunked, resumable)
+Virtual scroll : @tanstack/react-virtual v3 (listes > 500 items)
 ```
 
 ### Backend
@@ -102,12 +108,20 @@ Monitoring     : OpenTelemetry + Sentry
 
 ### Outils Dev
 ```
-Monorepo       : Turborepo
-Qualité code   : ESLint 9 + Prettier 3 + TypeScript strict
-Tests          : Vitest (unit) + Playwright (E2E) + MSW (mocks)
-Git hooks      : Husky + lint-staged + commitlint
-CI/CD          : GitHub Actions
-Conteneurisation: Docker + Docker Compose
+Monorepo       : Turborepo 2 (caching, parallel pipelines)
+Qualité code   : ESLint 9 (flat config) + Prettier 3 + TypeScript strict
+                 eslint-plugin-jsx-a11y (accessibilité obligatoire)
+                 eslint-plugin-unicorn (bonnes pratiques Node/TS)
+                 @typescript-eslint/eslint-plugin (règles TS avancées)
+Tests          : Vitest 2 (unit + integration) + Playwright 1.45 (E2E)
+                 MSW 2 (API mocking) + @testing-library/react (composants)
+Storybook      : Storybook 8 (composants UI isolés — obligatoire pour packages/ui)
+Git hooks      : Husky 9 + lint-staged + commitlint (conventional commits)
+Analyse bundle : @next/bundle-analyzer + webpack-bundle-analyzer
+Perf profiling : React DevTools Profiler + Lighthouse CI
+CI/CD          : GitHub Actions (test → build → deploy)
+Conteneurisation: Docker 26 + Docker Compose v2
+Secrets        : Doppler (dev/staging/prod) ou .env validé par Zod au démarrage
 ```
 
 ---
@@ -890,17 +904,20 @@ Pour **chaque module**, créer :
 // Composants obligatoires :
 
 // KpiCard — carte métrique avec tendance
+// Règle icône : toujours LucideIcon, jamais emoji
 type KpiCardProps = {
   title: string
   value: number | string
-  change?: number          // % évolution vs période précédente
+  change?: number               // % évolution vs période précédente
   trend?: 'up' | 'down' | 'neutral'
-  icon: LucideIcon
-  color?: string
+  icon: LucideIcon              // Ex: DollarSign, FolderKanban, Users, CheckSquare
+  iconColor?: string            // Ex: 'text-emerald-500' (Tailwind class)
   format?: 'number' | 'currency' | 'percent' | 'duration'
-  currency?: string
+  currency?: 'XAF' | 'EUR' | 'USD'
+  sparkline?: number[]          // 7 dernières valeurs pour mini-graphique
   onClick?: () => void
   loading?: boolean
+  description?: string          // Sous-titre contextuel
 }
 
 // MetricGrid — grille drag-droppable de KpiCards (layout personnalisable par user)
@@ -1291,6 +1308,276 @@ type FileUploaderProps = {
 ---
 
 ## 12. UI/UX — Design System
+
+### Système d'icônes — Règle absolue : zéro emoji dans l'UI
+
+L'intégralité des icônes de l'application est rendue avec **Lucide React** comme
+bibliothèque principale, SVG inline optimisé comme complément, et **jamais** avec des
+caractères emoji Unicode. Cette règle s'applique à chaque bouton, label, badge,
+notification, menu, état vide et en-tête de module.
+
+#### Stratégie icônes par contexte
+
+```typescript
+// packages/ui/components/icon.tsx
+// Wrapper standard — taille, couleur et accessibilité uniformisés
+
+import type { LucideIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+
+type IconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+
+const sizes: Record<IconSize, string> = {
+  xs: 'size-3',    // 12px — badges, tags inline
+  sm: 'size-4',    // 16px — boutons, menus, tables
+  md: 'size-5',    // 20px — actions principales, sidebar
+  lg: 'size-6',    // 24px — headers de section, KPI cards
+  xl: 'size-8',    // 32px — états vides, onboarding
+}
+
+interface IconProps {
+  icon: LucideIcon
+  size?: IconSize
+  className?: string
+  'aria-label'?: string
+  'aria-hidden'?: boolean
+}
+
+export function Icon({ icon: LucideIcon, size = 'md', className, ...props }: IconProps) {
+  return (
+    <LucideIcon
+      className={cn(sizes[size], 'shrink-0', className)}
+      strokeWidth={1.75}   // Épaisseur uniforme — look moderne et lisible
+      {...props}
+    />
+  )
+}
+```
+
+#### Mapping modules → icônes Lucide (exhaustif, obligatoire)
+
+```typescript
+// packages/ui/lib/module-icons.ts
+// Chaque module, chaque action, chaque statut a son icône dédiée.
+// Ne jamais utiliser un emoji à la place.
+
+import {
+  LayoutDashboard, FolderOpen, FolderKanban, CheckSquare,
+  DollarSign, Scale, Users, ShieldCheck, Target, Megaphone,
+  Truck, MessageSquare, CalendarDays, BarChart3, FileText,
+  Settings, Bell, Search, Menu, ChevronRight, ChevronDown,
+  Plus, Pencil, Trash2, Archive, Eye, Download, Upload,
+  RefreshCw, Filter, SortAsc, SortDesc, Columns3, List,
+  Grid3x3, Calendar, Kanban, GanttChartSquare,
+  AlertCircle, AlertTriangle, CheckCircle2, XCircle, Info,
+  Clock, Timer, Hourglass, CalendarClock,
+  User, UserPlus, UserX, UserCheck, UserCog, UsersRound,
+  Building2, Briefcase, Globe, MapPin, Phone, Mail, Link,
+  Lock, Unlock, Key, ShieldAlert, Eye as EyeIcon, EyeOff,
+  LogIn, LogOut, Fingerprint, QrCode,
+  FileUp, FilePlus, FileDown, FileSearch, FileCheck,
+  FileX, FilePen, FileStack, FolderPlus, FolderX,
+  Paperclip, Image, FileImage, FileVideo, FileAudio,
+  Cpu, Server, Database, Wifi, WifiOff, Activity,
+  TrendingUp, TrendingDown, PieChart, LineChart, BarChart2,
+  ChevronLeft, ChevronUp, ArrowLeft, ArrowRight, ArrowUp, ArrowDown,
+  MoreHorizontal, MoreVertical, Grip, GripVertical,
+  Star, Bookmark, Tag, Tags, Hash, Flag, Zap, Flame,
+  Sun, Moon, Monitor, Palette, Type, Bold, Italic,
+  AlignLeft, AlignCenter, AlignRight, List as ListIcon,
+  Table, Columns, Rows, Maximize2, Minimize2, RotateCcw,
+  Copy, Clipboard, ClipboardCheck, Share2, ExternalLink,
+  ThumbsUp, ThumbsDown, Heart, Send, Reply, Forward,
+  Printer, Scissors, Sliders, SlidersHorizontal,
+  LogIn as SignIn, Sparkles, Wand2, BrainCircuit,
+} from 'lucide-react'
+
+// Navigation principale
+export const NAV_ICONS = {
+  dashboard:      LayoutDashboard,
+  dossiers:       FolderKanban,
+  tasks:          CheckSquare,
+  finance:        DollarSign,
+  juridique:      Scale,
+  sirh:           Users,
+  audit:          ShieldCheck,
+  conformite:     ShieldCheck,
+  conseil:        Target,
+  communication:  Megaphone,
+  logistique:     Truck,
+  messagerie:     MessageSquare,
+  agenda:         CalendarDays,
+  rapports:       BarChart3,
+  documents:      FileText,
+  settings:       Settings,
+} as const satisfies Record<string, LucideIcon>
+
+// Actions CRUD — utilisées dans boutons et menus contextuels
+export const ACTION_ICONS = {
+  create:         Plus,
+  edit:           Pencil,
+  delete:         Trash2,
+  archive:        Archive,
+  view:           Eye,
+  download:       Download,
+  upload:         Upload,
+  refresh:        RefreshCw,
+  filter:         Filter,
+  search:         Search,
+  share:          Share2,
+  copy:           Copy,
+  print:          Printer,
+  export:         Download,
+  import:         Upload,
+} as const satisfies Record<string, LucideIcon>
+
+// Statuts dossiers / tâches
+export const STATUS_ICONS = {
+  draft:          Pencil,
+  in_progress:    Clock,
+  review:         Eye,
+  done:           CheckCircle2,
+  cancelled:      XCircle,
+  archived:       Archive,
+  overdue:        AlertTriangle,
+  blocked:        AlertCircle,
+} as const satisfies Record<string, LucideIcon>
+
+// Priorités
+export const PRIORITY_ICONS = {
+  low:            ChevronDown,
+  normal:         ChevronRight,
+  high:           ChevronUp,
+  critical:       Flame,
+} as const satisfies Record<string, LucideIcon>
+
+// États vides (Empty States) — taille xl uniquement
+export const EMPTY_STATE_ICONS = {
+  no_dossiers:    FolderOpen,
+  no_tasks:       CheckSquare,
+  no_messages:    MessageSquare,
+  no_results:     Search,
+  no_files:       FileStack,
+  no_events:      CalendarDays,
+  no_users:       UsersRound,
+  no_data:        BarChart3,
+} as const satisfies Record<string, LucideIcon>
+```
+
+#### SVG custom — Illustrations & états vides
+
+Pour les **illustrations** d'états vides, erreurs 404, onboarding et pages marketing,
+utiliser des SVG inline optimisés (SVGO). Ne jamais utiliser d'image PNG/JPG pour
+ces contextes. Créer un composant `<Illustration />` pour chaque cas.
+
+```typescript
+// packages/ui/components/illustrations/empty-dossiers.tsx
+// SVG monochrome (1 seule couleur = currentColor) pour compatibilité thèmes
+
+export function EmptyDossiersIllustration({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 240 180"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* SVG paths — style "ligne fine" cohérent avec Lucide */}
+      {/* Palette : currentColor pour le trait, opacity-10 pour les fonds */}
+      <rect x="40" y="60" width="160" height="100" rx="8"
+        stroke="currentColor" strokeWidth="1.5" fill="currentColor" fillOpacity="0.04" />
+      <path d="M40 80 H200" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="60" y="95" width="80" height="8" rx="4"
+        fill="currentColor" fillOpacity="0.15" />
+      <rect x="60" y="110" width="120" height="8" rx="4"
+        fill="currentColor" fillOpacity="0.10" />
+      <rect x="60" y="125" width="60" height="8" rx="4"
+        fill="currentColor" fillOpacity="0.07" />
+      {/* Dossier ouvert en avant-plan */}
+      <path d="M90 60 L90 30 Q90 24 96 24 L120 24 L126 30 H170 Q176 30 176 36 V60"
+        stroke="currentColor" strokeWidth="1.5" fill="currentColor" fillOpacity="0.06" />
+    </svg>
+  )
+}
+// Créer une illustration par état vide : dossiers, tâches, messages, erreur, succès, onboarding
+```
+
+#### Règles d'implémentation icônes — Obligatoire
+
+```typescript
+// 1. Toujours wrapper avec le composant <Icon /> — jamais l'import direct brut
+//    dans le JSX final (garantit taille et strokeWidth uniformes)
+
+// Bien :
+import { Icon } from '@nexadesk/ui'
+import { Plus } from 'lucide-react'
+<Icon icon={Plus} size="sm" aria-hidden />
+
+// Interdit :
+<Plus className="w-4 h-4" />          // strokeWidth non contrôlé
+<span>+</span>                           // emoji — INTERDIT
+<img src="plus.png" />                 // bitmap
+
+// 2. Boutons avec icône : toujours text + icône, jamais icône seule sans aria-label
+<Button>
+  <Icon icon={Plus} size="sm" aria-hidden />
+  Nouveau dossier
+</Button>
+
+// Bouton icône-seule (compact) : aria-label obligatoire
+<Button variant="ghost" size="icon" aria-label="Créer un dossier">
+  <Icon icon={Plus} size="sm" />
+</Button>
+
+// 3. StatusBadge — icône + texte + couleur sémantique
+function StatusBadge({ status }: { status: TaskStatus }) {
+  const config = {
+    todo:        { icon: Circle,       label: 'À faire',    color: 'text-muted-foreground' },
+    in_progress: { icon: Clock,        label: 'En cours',   color: 'text-blue-500' },
+    review:      { icon: Eye,          label: 'En revue',   color: 'text-amber-500' },
+    done:        { icon: CheckCircle2, label: 'Terminé',    color: 'text-emerald-500' },
+    cancelled:   { icon: XCircle,      label: 'Annulé',     color: 'text-rose-500' },
+  } satisfies Record<TaskStatus, { icon: LucideIcon; label: string; color: string }>
+
+  const { icon, label, color } = config[status]
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 text-xs font-medium', color)}>
+      <Icon icon={icon} size="xs" aria-hidden />
+      {label}
+    </span>
+  )
+}
+
+// 4. PriorityIndicator — barre colorée + icône + label
+function PriorityIndicator({ priority }: { priority: Priority }) {
+  const config = {
+    low:      { icon: ChevronDown,  label: 'Basse',    bar: 'bg-slate-300',   text: 'text-slate-500' },
+    normal:   { icon: Minus,        label: 'Normale',  bar: 'bg-blue-400',    text: 'text-blue-600' },
+    high:     { icon: ChevronUp,    label: 'Haute',    bar: 'bg-amber-400',   text: 'text-amber-600' },
+    critical: { icon: Flame,        label: 'Critique', bar: 'bg-rose-500',    text: 'text-rose-600' },
+  } satisfies Record<Priority, { icon: LucideIcon; label: string; bar: string; text: string }>
+  // ...render
+}
+
+// 5. Navigation sidebar — icône + label + badge compteur
+// Jamais d'emoji comme préfixe de section
+function NavItem({ href, icon: NavIcon, label, count }: NavItemProps) {
+  return (
+    <Link href={href} className="flex items-center gap-3 px-3 py-2 rounded-md ...">
+      <Icon icon={NavIcon} size="sm" aria-hidden />
+      <span className="flex-1 text-sm font-medium">{label}</span>
+      {count != null && count > 0 && (
+        <span className="rounded-full bg-primary px-1.5 py-0.5 text-xs font-bold text-primary-foreground">
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
+    </Link>
+  )
+}
+```
+
+---
 
 ### Configuration Tailwind
 
@@ -1931,7 +2218,306 @@ jobs:
 
 ---
 
-## 18. Standards de Code
+## 18. React 19 — Patterns Modernes Obligatoires
+
+### Server Components (RSC) — Architecture critique
+
+```typescript
+// RÈGLE : par défaut, tout composant est un Server Component (pas de 'use client')
+// N'ajouter 'use client' que si le composant a besoin de :
+// - Hooks React (useState, useEffect, useCallback...)
+// - Événements DOM (onClick, onChange...)
+// - Web APIs (localStorage, window...)
+// - Animations Framer Motion
+// - Bibliothèques client-only (chart, dnd-kit...)
+
+// Exemple pattern correct : données chargées côté serveur, interactivité côté client
+// app/(dashboard)/dossiers/page.tsx — SERVER COMPONENT (pas de 'use client')
+import { Suspense } from 'react'
+import { DossierList } from '@/components/modules/dossiers/dossier-list'
+import { DossierFilters } from '@/components/modules/dossiers/dossier-filters'
+import { DossierListSkeleton } from '@/components/modules/dossiers/dossier-list-skeleton'
+import { caller } from '@/lib/trpc/server'  // tRPC server-side caller
+import type { SearchParams } from '@/types'
+
+interface PageProps { searchParams: Promise<SearchParams> }
+
+export default async function DossiersPage({ searchParams }: PageProps) {
+  // Lecture searchParams avec await (React 19 pattern)
+  const params = await searchParams
+
+  // Données initiales chargées côté serveur (zéro waterfall)
+  const initialData = await caller.dossiers.list({
+    page: Number(params.page ?? 1),
+    status: params.status as string | undefined,
+    process: params.process as string | undefined,
+  })
+
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <DossierFilters defaultValues={params} />
+      <Suspense fallback={<DossierListSkeleton />}>
+        <DossierList initialData={initialData} />
+      </Suspense>
+    </div>
+  )
+}
+```
+
+### Server Actions — Mutations sans API route
+
+```typescript
+// app/(dashboard)/dossiers/actions.ts
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+import { z } from 'zod'
+import { getServerSession } from '@/lib/auth/server'
+import { createDossierSchema } from '@nexadesk/validators'
+
+export async function createDossierAction(formData: FormData) {
+  const session = await getServerSession()
+  if (!session) redirect('/login')
+
+  const raw = Object.fromEntries(formData)
+  const validated = createDossierSchema.safeParse(raw)
+
+  if (!validated.success) {
+    return { error: validated.error.flatten().fieldErrors }
+  }
+
+  const dossier = await caller.dossiers.create(validated.data)
+
+  revalidatePath('/dossiers')
+  return { success: true, id: dossier.id }
+}
+
+// Utilisation dans un Client Component :
+// const [state, action, isPending] = useActionState(createDossierAction, null)
+// <form action={action}>...</form>
+```
+
+### use() hook — Suspense-native data fetching
+
+```typescript
+// 'use client'
+import { use, Suspense } from 'react'
+
+// Composant qui consomme une Promise directement (React 19)
+function DossierStats({ statsPromise }: { statsPromise: Promise<DossierStats> }) {
+  const stats = use(statsPromise)   // Suspend le composant jusqu'à résolution
+  return <StatsDisplay stats={stats} />
+}
+
+// Usage depuis un Server Component parent :
+function DossierPage() {
+  const statsPromise = caller.dossiers.stats()  // Promise non-awaited
+
+  return (
+    <Suspense fallback={<StatsSkeleton />}>
+      <DossierStats statsPromise={statsPromise} />
+    </Suspense>
+  )
+}
+```
+
+### useOptimistic — UX instantanée sans attendre le serveur
+
+```typescript
+// 'use client'
+import { useOptimistic, useTransition } from 'react'
+
+function TaskKanbanCard({ task, onMove }: TaskCardProps) {
+  const [optimisticTask, updateOptimisticTask] = useOptimistic(
+    task,
+    (state, newColumn: string) => ({ ...state, boardColumn: newColumn })
+  )
+  const [isPending, startTransition] = useTransition()
+
+  const handleMove = (newColumn: string) => {
+    startTransition(async () => {
+      updateOptimisticTask(newColumn)  // Mise à jour immédiate UI
+      await onMove(task.id, newColumn) // Appel API en arrière-plan
+    })
+  }
+
+  return (
+    <div style={{ opacity: isPending ? 0.7 : 1 }}>
+      {/* La carte affiche déjà la nouvelle colonne pendant la requête */}
+      <TaskCard task={optimisticTask} onMove={handleMove} />
+    </div>
+  )
+}
+```
+
+### useFormStatus — Feedback de formulaire natif
+
+```typescript
+// 'use client'
+import { useFormStatus } from 'react-dom'
+
+function SubmitButton({ label = 'Enregistrer' }: { label?: string }) {
+  const { pending } = useFormStatus()
+
+  return (
+    <Button type="submit" disabled={pending}>
+      {pending ? (
+        <>
+          <Icon icon={Loader2} size="sm" className="animate-spin" aria-hidden />
+          Enregistrement...
+        </>
+      ) : (
+        <>
+          <Icon icon={Save} size="sm" aria-hidden />
+          {label}
+        </>
+      )}
+    </Button>
+  )
+}
+// Ce composant fonctionne à l'intérieur de tout <form action={serverAction}>
+```
+
+### Suspense granulaire + Error Boundaries
+
+```typescript
+// Chaque section de page critique est isolée dans son propre Suspense
+// pour un chargement progressif sans blocage global
+
+// app/(dashboard)/layout.tsx
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen">
+      <Sidebar />
+      <main className="flex-1 overflow-auto">
+        <ErrorBoundary fallback={<ErrorState />}>
+          <Suspense fallback={<PageSkeleton />}>
+            {children}
+          </Suspense>
+        </ErrorBoundary>
+      </main>
+
+      {/* Notifications panel — chargement indépendant */}
+      <Suspense fallback={null}>
+        <NotificationsPanel />
+      </Suspense>
+    </div>
+  )
+}
+```
+
+### Streaming SSR avec loading.tsx
+
+```typescript
+// app/(dashboard)/dossiers/loading.tsx
+// Affiché automatiquement pendant le chargement du Server Component parent
+export default function DossiersLoading() {
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <div className="h-10 w-80 animate-pulse rounded-md bg-muted" />
+      <div className="grid gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />
+        ))}
+      </div>
+    </div>
+  )
+}
+// Créer un loading.tsx par route de module pour un feedback immédiat
+```
+
+### Parallel Routes & Interception — Modals URL-addressables
+
+```typescript
+// app/(dashboard)/dossiers/@modal/(..)dossiers/[id]/page.tsx
+// Ouvre le détail dossier dans une modal sans quitter la liste
+// L'URL change (partageable), la liste reste visible derrière
+
+// app/(dashboard)/layout.tsx
+export default function Layout({
+  children,
+  modal,
+}: {
+  children: React.ReactNode
+  modal: React.ReactNode
+}) {
+  return (
+    <>
+      {children}
+      {modal}
+    </>
+  )
+}
+// Utiliser ce pattern pour : détail dossier, détail tâche, prévisualisation fichier
+// → l'utilisateur peut copier l'URL et l'ouvrir directement en page complète
+```
+
+### Metadata dynamique — SEO et onglets navigateur
+
+```typescript
+// app/(dashboard)/dossiers/[id]/page.tsx
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }): Promise<Metadata> {
+  const { id } = await params
+  const dossier = await caller.dossiers.getById({ id })
+
+  return {
+    title: `${dossier.reference} — ${dossier.objet} | NexaDesk`,
+    description: `Dossier ${dossier.category} — Statut: ${dossier.status}`,
+  }
+}
+```
+
+---
+
+## 18b. Patterns d'Accessibilité (a11y) — Obligatoires
+
+```typescript
+// Toutes les interactions non-textuelles doivent être accessibles au clavier
+// et aux lecteurs d'écran. WCAG AA minimum.
+
+// 1. Focus visible — ne jamais désactiver outline
+// Dans globals.css : *:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+
+// 2. Skip navigation
+function SkipNav() {
+  return (
+    <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 z-50 ...">
+      Aller au contenu principal
+    </a>
+  )
+}
+
+// 3. Annonces live pour les actions asynchrones (screen readers)
+function LiveAnnouncer() {
+  const { announcement } = useLiveAnnouncer()
+  return (
+    <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+      {announcement}
+    </div>
+  )
+}
+// Usage : announce('Dossier GC-DOS-2026-001 créé avec succès')
+
+// 4. Keyboard shortcuts documentés
+// Ctrl+K → Command palette
+// Ctrl+N → Nouvelle entrée dans le module actif
+// Escape → Fermer modal/panel
+// ? → Afficher les raccourcis disponibles
+
+// 5. Contrastes — tous les textes min. 4.5:1 sur fond (WCAG AA)
+// Vérifier avec : npx @accessibility/eslint-plugin
+
+// 6. aria-labels sur tous les boutons icône-seule (voir section icônes)
+
+// 7. Tableaux : thead + scope="col", zebra striping, sortable avec aria-sort
+```
+
+---
+
+## 19. Standards de Code
 
 ### TypeScript — Règles strictes
 
@@ -1957,16 +2543,18 @@ jobs:
   }
 }
 
-// INTERDIT :
-// ❌ any, as any, @ts-ignore
-// ❌ TODO sans ticket référencé
-// ❌ console.log en production
-// ❌ Mutations directes de state
-// ❌ useEffect pour dériver du state
-// ❌ Fetch direct sans tRPC/React Query
-// ❌ Strings magiques (utiliser const enums)
-// ❌ Fonctions > 50 lignes sans extraction
-// ❌ Fichiers > 300 lignes sans split
+// INTERDIT — violations bloquantes (lint + CI échoue) :
+// [NO] any, as any, @ts-ignore sans explication
+// [NO] TODO sans numéro de ticket (ex: // TODO(#123): ...)
+// [NO] console.log / console.error en production (utiliser pino logger)
+// [NO] Mutations directes de state (immer ou spread systématique)
+// [NO] useEffect pour dériver du state (utiliser useMemo)
+// [NO] Fetch direct sans tRPC/React Query
+// [NO] Strings magiques (utiliser const enums ou satisfies)
+// [NO] Fonctions > 50 lignes sans extraction dans helper
+// [NO] Fichiers > 300 lignes sans split en sous-composants
+// [NO] Emojis dans l'interface — utiliser exclusivement Lucide React ou SVG
+// [NO] Images bitmap pour les icônes — SVG uniquement (scalable, thémable)
 ```
 
 ### Conventions de nommage
