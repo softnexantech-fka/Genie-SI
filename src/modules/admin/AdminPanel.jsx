@@ -3,6 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // AdminPanel.jsx — SI Génie Consultant v127
 import { _lsSet, _lsRm, _lsGet, _noop, playSound, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, gcFileSave, _activeUser, gcViewDoc, getProcColor, gcHashPassword, gcReadFile, gcFmtSize, gcDownloadDoc, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { STATUS_CONFIG, DOC_CATEGORIES, ACCOUNT_STATUS_CONFIG, CODES, getCatInfo } from '../../core/constants.js'; // FIX v132 — getCatInfo importée
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge, ProgressBar, UserAvatar} from '../../components/UI.jsx';
@@ -43,6 +44,7 @@ export function DelaisAdminPanel({ T, localUser, setNotifications=_noop}){
 
   const [dCfg, setDCfg] = React.useState(() => gcGetDelaiConfig());
   const [saved, setSaved] = React.useState(false);
+  useRemoteSync({ 'gc-delai-config': setDCfg });
   const PROCS_L = {O01:"Administration",O02:"Juridique",O03:"Éval. & Gestion",S01:"Finance",S02:"Audit",S03:"RH",S04:"Communication",S05:"Logistique",S06:"Entretien",P01:"Management",P02:"Gouvernance",P03:"Contrôle gestion",P04:"Veille"};
 
   const save = () => {

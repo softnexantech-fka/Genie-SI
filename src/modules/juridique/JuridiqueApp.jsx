@@ -639,7 +639,8 @@ export function JuridiqueApp({ T, currentUser, setNotifications=_noop, dossiers=
                       <div key={d.id} style={{display:"flex",gap:4,alignItems:"center",background:"#DC262212",borderRadius:5,padding:"2px 9px"}}>
                         <span style={{fontSize:9}}>📎</span>
                         <span style={{color:T.text,fontSize:9}}>{d.name}</span>
-                        <button onClick={()=>{const a=document.createElement("a");a.href=d.data;a.download=d.name;a.click();}} style={{background:"none",border:"none",color:"#3B82F6",cursor:"pointer",fontSize:9,padding:0}}>⬇</button>
+                        <button onClick={()=>gcViewDoc({id:d.id,serverUrl:d.serverUrl,url:d.url||d.data,dataUrl:d.dataUrl||d.data,nom:d.name,name:d.name})} style={{background:"none",border:"none",color:"#10B981",cursor:"pointer",fontSize:9,padding:0}}>👁️</button>
+                        <button onClick={()=>gcDownloadDoc({id:d.id,serverUrl:d.serverUrl,url:d.url||d.data,dataUrl:d.dataUrl||d.data,nom:d.name,name:d.name})} style={{background:"none",border:"none",color:"#3B82F6",cursor:"pointer",fontSize:9,padding:0}}>⬇</button>
                         <button onClick={()=>{const upd=veille.map(x=>x.id===v.id?{...x,docs:(x.docs||[]).filter(dd=>dd.id!==d.id)}:x);saveVeille(upd);}} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:10,padding:0}}>✕</button>
                       </div>
                     ))}
@@ -702,7 +703,8 @@ export function JuridiqueApp({ T, currentUser, setNotifications=_noop, dossiers=
                           <div style={{color:T.textMuted,fontSize:9}}>{d.sizeStr} · {d.uploadedBy} · {new Date(d.uploadedAt).toLocaleDateString("fr-FR")}</div>
                         </div>
                         <div style={{display:"flex",gap:5}}>
-                          {d.data&&<button onClick={()=>{const a=document.createElement("a");a.href=d.data;a.download=d.name;a.click();}} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:9,fontWeight:700}}>⬇ DL</button>}
+                          {(d.id||d.serverUrl||d.url||d.data||d.dataUrl)&&<button onClick={()=>gcViewDoc({id:d.id,serverUrl:d.serverUrl,url:d.url||d.data,dataUrl:d.dataUrl||d.data,nom:d.name,name:d.name})} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:9,fontWeight:700}}>👁️ Voir</button>}
+                          {(d.id||d.serverUrl||d.url||d.data||d.dataUrl)&&<button onClick={()=>gcDownloadDoc({id:d.id,serverUrl:d.serverUrl,url:d.url||d.data,dataUrl:d.dataUrl||d.data,nom:d.name,name:d.name})} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"3px 10px",cursor:"pointer",fontSize:9,fontWeight:700}}>⬇ DL</button>}
                           {isJurResp&&<button onClick={()=>saveDocs(uploadedDocs.filter(x=>x.id!==d.id))} style={{background:"none",border:"none",color:"#EF4444",cursor:"pointer",fontSize:14}}>🗑️</button>}
                         </div>
                       </div>
