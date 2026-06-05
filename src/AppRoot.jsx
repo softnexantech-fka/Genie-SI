@@ -1012,14 +1012,38 @@ export default function App() {
     // Écouter l'event WebSocket disk_alert relayé depuis datastore via CustomEvent
     window.addEventListener('gc-disk-alert', onDiskAlert);
 
+    // Resync global admin : re-hydrater toutes les clés React depuis le serveur
+    const onResyncAll = async () => {
+      console.log('[AppRoot] gc-resync-all reçu — re-hydratation complète');
+      try {
+        const { dsGet } = await import('./core/datastore.js');
+        const criticalSetters = [
+          { key: 'users',              fn: (v) => { if (Array.isArray(v) && v.length) { setUsersState(v); setProdUsers(v); } } },
+          { key: 'dossiers',           fn: (v) => { if (Array.isArray(v)) setDossiers(v); } },
+          { key: 'taches',             fn: (v) => { if (Array.isArray(v)) setTaches(v); } },
+          { key: 'rdvs',               fn: (v) => { if (Array.isArray(v)) setRdvs(v); } },
+          { key: 'partners',           fn: (v) => { if (Array.isArray(v)) setPartnersStateRaw(v); } },
+          { key: 'gc-app-habilitations', fn: (v) => { if (Array.isArray(v)) setAppHabilitations(v); } },
+        ];
+        await Promise.allSettled(criticalSetters.map(async ({ key, fn }) => {
+          try {
+            const val = await dsGet(key, null);
+            if (val !== null && val !== undefined) { lsSave(key, val); fn(val); }
+          } catch {}
+        }));
+      } catch {}
+    };
+    window.addEventListener('gc-resync-all', onResyncAll);
+
     window.addEventListener('gc-session-expired', onSessionExpired);
     window.addEventListener('gc-offline-queue-overflow', onQueueOverflow);
     return () => {
       window.removeEventListener('gc-session-expired', onSessionExpired);
       window.removeEventListener('gc-offline-queue-overflow', onQueueOverflow);
       window.removeEventListener('gc-disk-alert', onDiskAlert);
+      window.removeEventListener('gc-resync-all', onResyncAll);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { isDemoModeRef.current = isDemoMode; }, [isDemoMode]);
 

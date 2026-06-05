@@ -651,6 +651,32 @@ async function initWebSocket() {
       console.log(`[DS] Resync global demandé par ${by} (${reason})`);
       _cache.clear();
       _pendingFetches.clear();
+
+      // Effacer TOUS les timestamps __ts__:* du localStorage pour que l'hydratation
+      // AppRoot prenne les données du serveur comme référence (plus de "local plus récent")
+      try {
+        const keysToWipe = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        keysToWipe.forEach(k => localStorage.removeItem(k));
+        if (keysToWipe.length) console.log(`[DS] Resync: ${keysToWipe.length} timestamps vidés`);
+      } catch {}
+
+      // Dispatcher des StorageEvents pour TOUTES les clés critiques
+      // → réveille les hooks useRemoteSync qui n'écoutent que 'storage'
+      const broadcastKeys = [
+        'dossiers','gc-dossiers','taches','rdvs','partners','users',
+        'gc-dossier-files','gc-files','gc-docs-unified','gc-standalone-docs',
+        'gc-messages','gc-notifications','gc-session-logs','gc-app-habilitations',
+        'gc-sirh-presences','gc-rdvs','gc-partners','gc-messages-global',
+      ];
+      broadcastKeys.forEach(k => {
+        try {
+          window.dispatchEvent(new StorageEvent('storage', {
+            key: `__GC__${k}`,
+            newValue: JSON.stringify({ ts: ts || Date.now(), action: 'force_resync' }),
+          }));
+        } catch {}
+      });
+
       _syncListeners.forEach(fn => {
         try { fn({ key: '__all__', action: 'force_resync', ts, by }); } catch {}
       });
@@ -695,6 +721,13 @@ async function initWebSocket() {
           pushed++;
         } catch { /* silencieux */ }
       }
+      // Après avoir tout poussé, effacer les __ts__ locaux pour que le resync
+      // post-collecte (25s) fasse autorité : le serveur aura les données agrégées
+      try {
+        const tsKeys = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        tsKeys.forEach(k => localStorage.removeItem(k));
+      } catch {}
+
       // Signaler au serveur que ce client a fini de pousser
       try { _socket.emit('push_complete', { collectId, pushed }); } catch {}
       console.log(`[DS] collect-push terminé: ${pushed} clés poussées (collectId=${collectId})`);

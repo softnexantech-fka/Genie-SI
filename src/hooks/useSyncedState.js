@@ -43,6 +43,8 @@ export function useSyncedState(key, fallback = null) {
     const unsub = dsOnSync((event) => {
       if (!mountedRef.current) return;
       // FIX SYNC-R1 : force_resync ou heartbeat → re-fetch inconditionnellement
+      // Les __ts__ ont déjà été vidés par datastore.js resync_all, donc dsGet ira chercher
+      // sur le serveur sans être bloqué par le guard "local plus récent"
       if (event.action === 'force_resync' || event.action === 'heartbeat') {
         dsGet(key, fallback).then(val => {
           if (!mountedRef.current) return;
@@ -131,6 +133,7 @@ export function useRemoteSync(syncMap) {
   mapRef.current = syncMap; // toujours à jour sans re-créer l'effet
 
   useEffect(() => {
+    // Écoute data_changed via StorageEvent __GC__key
     const handler = async (e) => {
       if (!e.key?.startsWith('__GC__')) return;
       const key = e.key.slice(6);
@@ -142,7 +145,25 @@ export function useRemoteSync(syncMap) {
       } catch {}
     };
     window.addEventListener('storage', handler);
-    return () => window.removeEventListener('storage', handler);
+
+    // Écoute resync_all global (admin) → re-fetcher TOUTES les clés suivies
+    const handleResyncAll = async () => {
+      const entries = Object.entries(mapRef.current);
+      await Promise.allSettled(entries.map(async ([key, setter]) => {
+        try {
+          const val = await dsGet(key, null);
+          if (val !== null && val !== undefined) setter(val);
+        } catch {}
+      }));
+    };
+    window.addEventListener('gc-resync-all', handleResyncAll);
+    window.addEventListener('gc-sync-online', handleResyncAll);
+
+    return () => {
+      window.removeEventListener('storage', handler);
+      window.removeEventListener('gc-resync-all', handleResyncAll);
+      window.removeEventListener('gc-sync-online', handleResyncAll);
+    };
   }, []);
 }
 
