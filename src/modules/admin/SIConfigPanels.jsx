@@ -641,6 +641,64 @@ export function SyncControlPanel({ T, currentUser }) {
     setLoading('');
   };
 
+  // Tirer une clé spécifique depuis le serveur vers ce poste
+  const handlePullKey = async (key) => {
+    try {
+      const { dsGet } = await import('../../core/datastore.js');
+      const { lsSave } = await import('../../core/storage.js');
+      const val = await dsGet(key, null);
+      if (val !== null && val !== undefined) {
+        lsSave(key, val);
+        addLog(`↓ ${key} : serveur → local (${Array.isArray(val) ? val.length + ' entrées' : 'ok'})`, 'success');
+        // Forcer re-fetch dans useSyncedState via StorageEvent
+        try { window.dispatchEvent(new StorageEvent('storage', { key: `__GC__${key}`, newValue: JSON.stringify({ ts: Date.now(), action: 'pull' }) })); } catch {}
+      } else {
+        addLog(`↓ ${key} : clé absente du serveur`, 'warn');
+      }
+    } catch (e) { addLog(`Erreur pull ${key} : ${e.message}`, 'error'); }
+    await fetchKeyCounts();
+  };
+
+  // Pousser une clé spécifique depuis ce poste vers le serveur
+  const handlePushKey = async (key) => {
+    try {
+      const raw = _lsGet(key);
+      if (!raw) { addLog(`↑ ${key} : rien en local`, 'warn'); return; }
+      const val = JSON.parse(raw);
+      const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+      const proxyUrl = status?.proxyUrl || 'http://localhost:3001';
+      const r = await fetch(`${proxyUrl}/api/data/${encodeURIComponent(key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ value: val }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (r.ok) addLog(`↑ ${key} : local → serveur (${Array.isArray(val) ? val.length + ' entrées' : 'ok'})`, 'success');
+      else addLog(`↑ ${key} : erreur ${r.status}`, 'error');
+    } catch (e) { addLog(`Erreur push ${key} : ${e.message}`, 'error'); }
+    await fetchKeyCounts();
+  };
+
+  // Tirer TOUTES les clés du serveur vers ce poste (serveur fait autorité)
+  const handlePullAllFromServer = async () => {
+    if (!await _dlg.confirm(
+      'Écraser TOUTES les données de CE POSTE avec celles du serveur ?\n\nLes données locales non encore synchronisées seront perdues.',
+      'Serveur → Ce poste', null, true
+    )) return;
+    setLoading('pull-all');
+    addLog('Téléchargement depuis serveur...', 'info');
+    const result = await dsForceResyncAll();
+    if (result.ok) {
+      addLog(`Téléchargement terminé : ${result.synced || 0} clés mises à jour`, 'success');
+      playSound('success');
+      gcToast.success('Ce poste est maintenant conforme au serveur');
+    } else {
+      addLog(`Impossible : ${result.reason}`, 'error');
+    }
+    setLoading('');
+    await fetchKeyCounts();
+  };
+
   const handleForceResync = async () => {
     setLoading('resync');
     addLog('Resync local en cours...', 'info');
@@ -888,11 +946,74 @@ export function SyncControlPanel({ T, currentUser }) {
         </div>
       </div>
 
-      {/* Comparaison clés serveur/local */}
+      {/* ── Actions globales ─────────────────────────────────────────── */}
+      <div style={{ marginBottom:14 }}>
+        <div style={{ color:T.textMuted, fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>Actions globales</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+          <button disabled={!!loading} onClick={fetchServerInfo}
+            style={{ background:'#3B82F622', border:'1px solid #3B82F644', color:'#3B82F6', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='server' ? '⏳...' : '🔍 Vérifier statut serveur'}
+          </button>
+          <button disabled={!!loading} onClick={fetchKeyCounts}
+            style={{ background:'#F59E0B22', border:'1px solid #F59E0B44', color:'#F59E0B', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='keys' ? '⏳ Analyse...' : '📊 Comparer local ↔ serveur'}
+          </button>
+        </div>
+
+        {/* 3 modes de conformité */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:8 }}>
+          <div style={{ background:'#06B6D410', border:'1px solid #06B6D440', borderRadius:10, padding:10, textAlign:'center' }}>
+            <div style={{ color:'#06B6D4', fontWeight:800, fontSize:12, marginBottom:4 }}>↓ Serveur → Ce poste</div>
+            <div style={{ color:T.textMuted, fontSize:10, marginBottom:8 }}>Ce poste prend les données du serveur. Utiliser après un resync admin.</div>
+            <button disabled={!!loading} onClick={handlePullAllFromServer}
+              style={{ width:'100%', background:'#06B6D422', border:'1px solid #06B6D466', color:'#06B6D4', borderRadius:7, padding:'7px 6px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+              {loading==='pull-all' ? '⏳...' : '↓ Appliquer serveur ici'}
+            </button>
+          </div>
+          <div style={{ background:'#EC489910', border:'2px solid #EC489940', borderRadius:10, padding:10, textAlign:'center' }}>
+            <div style={{ color:'#EC4899', fontWeight:800, fontSize:12, marginBottom:4 }}>↑ Ce poste → Serveur</div>
+            <div style={{ color:T.textMuted, fontSize:10, marginBottom:8 }}>Envoyer les données locales au serveur (fusion — ne supprime rien).</div>
+            <button disabled={!!loading} onClick={handlePushLocal}
+              style={{ width:'100%', background:'#EC489922', border:'1px solid #EC489966', color:'#EC4899', borderRadius:7, padding:'7px 6px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+              {loading==='push' ? '⏳...' : '↑ Envoyer local au serveur'}
+            </button>
+          </div>
+          <div style={{ background:'#F59E0B10', border:'2px solid #F59E0B50', borderRadius:10, padding:10, textAlign:'center' }}>
+            <div style={{ color:'#F59E0B', fontWeight:800, fontSize:12, marginBottom:4 }}>⇄ Tous les postes</div>
+            <div style={{ color:T.textMuted, fontSize:10, marginBottom:8 }}>Collecte tous les postes, fusionne, redistribue. Recommandé pour récupérer des données.</div>
+            <button disabled={!!loading} onClick={handleCollectAll}
+              style={{ width:'100%', background:'#F59E0B22', border:'2px solid #F59E0B88', color:'#F59E0B', borderRadius:7, padding:'7px 6px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+              {loading==='collect-all' ? '⏳...' : '⇄ Collecter & Agréger'}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+          <button disabled={!!loading} onClick={handleForceResync}
+            style={{ background:'#22C55E22', border:'1px solid #22C55E44', color:'#22C55E', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='resync' ? '⏳ Resync...' : '🔄 Resync ce poste (serveur → ici)'}
+          </button>
+          <button disabled={!!loading} onClick={handleResyncAll}
+            style={{ background:'#6366F122', border:'1px solid #6366F144', color:'#6366F1', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='resync-all' ? '⏳ Envoi...' : '📡 Resync tous les postes (serveur → tous)'}
+          </button>
+          <button disabled={!!loading} onClick={handleSyncIdbFiles}
+            style={{ background:'#8B5CF622', border:'1px solid #8B5CF644', color:'#8B5CF6', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='idb' ? '⏳ Sync...' : '📁 Sync fichiers hors ligne (IDB)'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Comparaison clé par clé avec actions ──────────────────── */}
       {keyCounts && (
-        <div style={{ background:T.surface2, border:'1px solid #F59E0B33', borderRadius:12, padding:14, marginBottom:12, maxHeight:240, overflowY:'auto' }}>
-          <div style={{ color:'#F59E0B', fontWeight:700, fontSize:12, marginBottom:8 }}>Inventaire clés serveur</div>
-          {Object.entries(keyCounts).slice(0,50).map(([k, info]) => {
+        <div style={{ background:T.surface2, border:'1px solid #F59E0B33', borderRadius:12, padding:14, marginBottom:12, maxHeight:320, overflowY:'auto' }}>
+          <div style={{ color:'#F59E0B', fontWeight:700, fontSize:12, marginBottom:8 }}>
+            Détail clé par clé — local ↔ serveur
+            <span style={{ color:T.textMuted, fontWeight:400, fontSize:10, marginLeft:8 }}>
+              (⚠ = écart, ↓ = prendre serveur, ↑ = envoyer local)
+            </span>
+          </div>
+          {Object.entries(keyCounts).slice(0,60).map(([k, info]) => {
             const localRaw = _lsGet(k);
             let localCount = 0;
             try { const lv = JSON.parse(localRaw); localCount = Array.isArray(lv) ? lv.length : (lv ? 1 : 0); } catch {}
@@ -900,50 +1021,27 @@ export function SyncControlPanel({ T, currentUser }) {
             const hasDiff = Math.abs(diff) > 0;
             return (
               <div key={k} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                padding:'3px 6px', borderRadius:4, marginBottom:2,
-                background: hasDiff ? '#F59E0B10' : 'transparent' }}>
-                <span style={{ color:T.text, fontSize:10, fontFamily:'monospace' }}>{k}</span>
-                <span style={{ fontSize:10, color: hasDiff ? '#F59E0B' : T.textMuted, fontWeight: hasDiff ? 700 : 400 }}>
+                padding:'4px 6px', borderRadius:5, marginBottom:3,
+                background: hasDiff ? (diff > 0 ? '#06B6D410' : '#EC489910') : 'transparent',
+                border: hasDiff ? `1px solid ${diff > 0 ? '#06B6D430' : '#EC489930'}` : '1px solid transparent' }}>
+                <span style={{ color:T.text, fontSize:10, fontFamily:'monospace', flex:1 }}>{hasDiff ? '⚠ ' : '✓ '}{k}</span>
+                <span style={{ fontSize:10, color: hasDiff ? (diff > 0 ? '#06B6D4' : '#EC4899') : T.textMuted, fontWeight: hasDiff ? 700 : 400, minWidth:90, textAlign:'center' }}>
                   local:{localCount} / srv:{info.count}
-                  {hasDiff ? ` (Δ${diff > 0 ? '+' : ''}${diff})` : ''}
+                  {hasDiff ? ` (${diff > 0 ? '+' : ''}${diff} srv)` : ''}
                 </span>
+                {hasDiff && (
+                  <div style={{ display:'flex', gap:4, marginLeft:6 }}>
+                    <button onClick={() => handlePullKey(k)} title="Prendre données du serveur → ce poste"
+                      style={{ background:'#06B6D422', border:'1px solid #06B6D466', color:'#06B6D4', borderRadius:5, padding:'2px 7px', cursor:'pointer', fontSize:10, fontWeight:700 }}>↓ Srv</button>
+                    <button onClick={() => handlePushKey(k)} title="Envoyer données locales → serveur"
+                      style={{ background:'#EC489922', border:'1px solid #EC489966', color:'#EC4899', borderRadius:5, padding:'2px 7px', cursor:'pointer', fontSize:10, fontWeight:700 }}>↑ Loc</button>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
-
-      {/* Actions */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
-        <button disabled={!!loading} onClick={fetchServerInfo}
-          style={{ background:'#3B82F622', border:'1px solid #3B82F644', color:'#3B82F6', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='server' ? '⏳ Chargement...' : 'Vérifier statut serveur'}
-        </button>
-        <button disabled={!!loading} onClick={fetchKeyCounts}
-          style={{ background:'#F59E0B22', border:'1px solid #F59E0B44', color:'#F59E0B', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='keys' ? '⏳ Analyse...' : 'Comparer clés (local vs serveur)'}
-        </button>
-        <button disabled={!!loading} onClick={handleForceResync}
-          style={{ background:'#22C55E22', border:'1px solid #22C55E44', color:'#22C55E', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='resync' ? '⏳ Resync...' : 'Resync ce poste'}
-        </button>
-        <button disabled={!!loading} onClick={handleResyncAll}
-          style={{ background:'#6366F122', border:'1px solid #6366F144', color:'#6366F1', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='resync-all' ? '⏳ Envoi...' : 'Resync tous les postes'}
-        </button>
-        <button disabled={!!loading} onClick={handleCollectAll}
-          style={{ background:'#F59E0B22', border:'2px solid #F59E0B88', color:'#F59E0B', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='collect-all' ? '⏳ Collecte...' : '🔄 Collecter & Agréger tous les postes'}
-        </button>
-        <button disabled={!!loading} onClick={handlePushLocal}
-          style={{ background:'#EC489922', border:'1px solid #EC489944', color:'#EC4899', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='push' ? '⏳ Push...' : 'Pousser données locales → serveur'}
-        </button>
-        <button disabled={!!loading} onClick={handleSyncIdbFiles}
-          style={{ background:'#8B5CF622', border:'1px solid #8B5CF644', color:'#8B5CF6', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
-          {loading==='idb' ? '⏳ Sync...' : 'Sync fichiers hors ligne (IDB)'}
-        </button>
-      </div>
 
       {/* Réinitialisation tombstones — zone danger */}
       <div style={{ background:'#EF444408', border:'1px solid #EF444430', borderRadius:10, padding:12, marginBottom:12 }}>
