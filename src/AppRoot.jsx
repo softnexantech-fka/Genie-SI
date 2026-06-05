@@ -580,12 +580,14 @@ export default function App() {
 
             if (serverVal !== null) {
               // ══ CAS A : clé présente sur le serveur ══
-              // Comparaison timestamps : n'écraser le local QUE si le serveur est au moins aussi récent.
-              // __ts__:key = dernière écriture locale (dsSave)
-              // __svts__:key = dernier updated_at connu du serveur (dsGet)
+              // Comparaison timestamps — tous deux en millisecondes depuis la correction dsGet.
+              // __ts__:key  = timestamp dernière écriture locale confirmée par serveur (ms)
+              // __svts__:key = timestamp serveur lors du dernier dsGet (ms, converti depuis secondes Unix)
               const localWriteTs  = parseInt(_lsGet('__ts__:' + key) || '0');
               const serverKnownTs = parseInt(_lsGet('__svts__:' + key) || '0');
-              const serverIsNewer = localWriteTs === 0 || serverKnownTs >= localWriteTs;
+              // Si localWriteTs=0, jamais écrit → serveur gagne.
+              // Si serverKnownTs=0, jamais récupéré → faire confiance au serveur quand même.
+              const serverIsNewer = localWriteTs === 0 || serverKnownTs === 0 || serverKnownTs >= localWriteTs;
 
               if (serverIsNewer) {
                 lsSave(key, serverVal);

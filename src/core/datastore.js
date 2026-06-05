@@ -532,19 +532,10 @@ async function initWebSocket() {
     _socket.on('data_changed', ({ key, action, by, ts, updatedAt, itemId }) => {
       if (!key) return;
 
-      // Protection contre les régressions temps-réel :
-      // si notre dernière écriture locale est plus récente que ce broadcast, on ignore.
-      if (action === 'set') {
-        try {
-          const localWriteTs = parseInt(_lsGet('__ts__:' + key) || '0');
-          const serverBroadcastTs = updatedAt || ts || 0;
-          if (localWriteTs > serverBroadcastTs) {
-            // Notre donnée locale est plus récente — ne pas invalider le cache
-            return;
-          }
-        } catch {}
-      }
-
+      // Toujours invalider le cache et notifier les listeners — la guard
+      // localWriteTs > broadcastTs bloquait tous les updates cross-machine
+      // car les timestamps étaient dans des unités incompatibles.
+      // La deduplication (ne pas re-rendre inutilement) est gérée dans useSyncedState.
       _cache.delete(key);
       _pendingFetches.delete(key);
 
@@ -583,35 +574,31 @@ async function initWebSocket() {
       } catch {}
     });
 
-    // FIX SYNC-F1 — file_uploaded : invalider cache des clés fichiers + notifier composants
+    // FIX SYNC-F1 — file_uploaded : invalider cache + notifier avec délai
+    // Le délai 700ms laisse le temps au client émetteur d'appeler dsSave('gc-dossier-files')
+    // avant que les autres machines re-fetchen — évite de récupérer l'ancienne liste.
     _socket.on('file_uploaded', (data) => {
-      // Invalider les clés liées aux fichiers pour forcer un re-fetch
       const fileKeys = ['gc-dossier-files', 'gc-files', 'gc-docs-unified', 'gc-standalone-docs'];
       if (data?.module) {
-        if (data.module === 'sirh')   fileKeys.push('gc-sirh-fichiers');
-        if (data.module === 'crm')    fileKeys.push('gc-crm-interactions');
-        if (data.module === 'docs')   fileKeys.push('gc-docs-unified');
+        if (data.module === 'sirh')       fileKeys.push('gc-sirh-fichiers');
+        if (data.module === 'crm')        fileKeys.push('gc-crm-interactions');
+        if (data.module === 'docs')       fileKeys.push('gc-docs-unified');
         if (data.module === 'logistique') fileKeys.push('gc-stocks');
       }
-      fileKeys.forEach(k => {
-        _cache.delete(k);
-        _pendingFetches.delete(k);
-      });
-      // Notifier tous les listeners (composants React et hooks)
-      _syncListeners.forEach(fn => {
-        try { fn({ key: data?.dossierId ? 'gc-dossier-files' : 'gc-files', action: 'file_uploaded', type: 'file_uploaded', ...data }); } catch {}
-      });
-      // Dispatch StorageEvent pour les composants qui écoutent via useRemoteSync
-      try {
-        window.dispatchEvent(new StorageEvent('storage', {
-          key: '__GC__gc-dossier-files',
-          newValue: JSON.stringify({ ts: Date.now(), action: 'file_uploaded' }),
-        }));
-        window.dispatchEvent(new StorageEvent('storage', {
-          key: '__GC__gc-files',
-          newValue: JSON.stringify({ ts: Date.now(), action: 'file_uploaded' }),
-        }));
-      } catch {}
+      // Invalider le cache immédiatement
+      fileKeys.forEach(k => { _cache.delete(k); _pendingFetches.delete(k); });
+
+      // Notifier après 700ms pour que le dsSave du client émetteur soit arrivé sur le serveur
+      setTimeout(() => {
+        fileKeys.forEach(k => { _cache.delete(k); _pendingFetches.delete(k); });
+        _syncListeners.forEach(fn => {
+          try { fn({ key: data?.dossierId ? 'gc-dossier-files' : 'gc-files', action: 'file_uploaded', type: 'file_uploaded', ...data }); } catch {}
+        });
+        try {
+          window.dispatchEvent(new StorageEvent('storage', { key: '__GC__gc-dossier-files', newValue: JSON.stringify({ ts: Date.now(), action: 'file_uploaded' }) }));
+          window.dispatchEvent(new StorageEvent('storage', { key: '__GC__gc-files',         newValue: JSON.stringify({ ts: Date.now(), action: 'file_uploaded' }) }));
+        } catch {}
+      }, 700);
     });
 
     // FIX SYNC-F2 — file_deleted : nettoyer l'IDB local + notifier composants
@@ -1046,8 +1033,9 @@ export async function dsGet(key, fallback = null) {
       const json = await r.json();
       const val  = json.value ?? fallback;
       _cache.set(key, { data: val, ts: Date.now() });
-      // Stocker le timestamp serveur pour comparaison lors de l'hydratation
-      if (json.updatedAt) try { _lsSet('__svts__:' + key, String(json.updatedAt)); } catch {}
+      // Stocker le timestamp serveur en millisecondes pour comparaison cohérente avec __ts__
+      // Le serveur renvoie updated_at en secondes Unix → convertir en ms
+      if (json.updatedAt) try { _lsSet('__svts__:' + key, String(json.updatedAt * 1000)); } catch {}
       return val;
     } catch (e) {
       if (e.name !== 'AbortError') console.warn(`[DS] Réseau ${key}:`, e.message);
