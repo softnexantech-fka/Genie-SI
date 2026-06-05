@@ -945,6 +945,52 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // FIX SYNC-S1 — Session expirée : déconnexion automatique propre
+  useEffect(() => {
+    let _lastSessionAlert = 0;
+    const onSessionExpired = () => {
+      const now = Date.now();
+      // Éviter les alertes en boucle (throttle 60s)
+      if (now - _lastSessionAlert < 60_000) return;
+      _lastSessionAlert = now;
+      console.warn('[SI] Session JWT expirée — déconnexion automatique');
+      // Notifier l'utilisateur avec un toast si disponible, puis déconnecter
+      try {
+        import('./components/ToastManager.jsx').then(({ gcToast }) => {
+          gcToast && gcToast.warning && gcToast.warning('Session expirée — reconnexion requise');
+        }).catch(() => {});
+      } catch {}
+      // Délai 2s pour que le toast soit visible avant déconnexion
+      setTimeout(() => {
+        try {
+          // Nettoyer le token local et recharger la page (retour au login)
+          ['gc-jwt-token', 'authToken', 'token', 'gc-current-user'].forEach(k => {
+            try { localStorage.removeItem(k); } catch {}
+          });
+          window.location.reload();
+        } catch {}
+      }, 2000);
+    };
+
+    // FIX SYNC-Q1 — File offline surchargée : avertissement toast
+    const onQueueOverflow = (e) => {
+      const { reason, dropped } = e?.detail || {};
+      console.warn(`[SI] File offline surchargée : ${dropped || 0} modifications ignorées (${reason || ''})`);
+      try {
+        import('./components/ToastManager.jsx').then(({ gcToast }) => {
+          if (gcToast?.warning) gcToast.warning(`Hors ligne : ${dropped || 0} modifications anciennes perdues (limite dépassée). Reconnectez-vous pour resynchroniser.`);
+        }).catch(() => {});
+      } catch {}
+    };
+
+    window.addEventListener('gc-session-expired', onSessionExpired);
+    window.addEventListener('gc-offline-queue-overflow', onQueueOverflow);
+    return () => {
+      window.removeEventListener('gc-session-expired', onSessionExpired);
+      window.removeEventListener('gc-offline-queue-overflow', onQueueOverflow);
+    };
+  }, []);
+
   useEffect(() => { isDemoModeRef.current = isDemoMode; }, [isDemoMode]);
 
   // FIX v63 C2  -  Chargement async sécurisé des clés chiffrées au boot.

@@ -309,8 +309,24 @@ const MAX_DB_GB      = parseInt(process.env.MAX_DB_GB   || '250');
 const MAX_VALUE_MB   = parseInt(process.env.MAX_VALUE_MB || '10');
 const LOCAL_NETWORK_ORIGIN = /^https?:\/\/((localhost|127\.0\.0\.1)|(192\.168\.\d+\.\d+)|(10\.\d+\.\d+\.\d+)|(172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+))(?::\d+)?$/;
 
-// Minimal logger interface used in a few security/backup paths.
-const logger = console;
+// FIX SYNC-S2 — Logger sécurisé : filtre les tokens JWT et mots de passe des logs.
+// Évite qu'un token expiré ou invalide dans un header soit loggué en clair.
+const _sanitizeForLog = (msg) => {
+  if (typeof msg !== 'string') {
+    try { msg = JSON.stringify(msg); } catch { msg = String(msg); }
+  }
+  return msg
+    .replace(/Bearer\s+[\w.\-]+/gi, 'Bearer [REDACTED]')
+    .replace(/"password"\s*:\s*"[^"]*"/g, '"password":"[REDACTED]"')
+    .replace(/"passwordHash"\s*:\s*"[^"]*"/g, '"passwordHash":"[REDACTED]"')
+    .replace(/"token"\s*:\s*"[^"]*"/g, '"token":"[REDACTED]"');
+};
+const logger = {
+  log:   (...a) => console.log(...a.map(_sanitizeForLog)),
+  warn:  (...a) => console.warn(...a.map(_sanitizeForLog)),
+  error: (...a) => console.error(...a.map(_sanitizeForLog)),
+  info:  (...a) => console.info(...a.map(_sanitizeForLog)),
+};
 
 // ── Sécurité ────────────────────────────────────────────────────────────────
 const JWT_EXPIRES_IN    = '8h';

@@ -341,17 +341,18 @@ function saveOfflineQueue(q) {
     const json = JSON.stringify(q);
     const sizeBytes = new Blob([json]).size;
     
-    // ✅ CRITICAL FIX: Enforce size limits to prevent localStorage quota exceeded
-    if (sizeBytes > MAX_OFFLINE_QUEUE_SIZE) {
-      console.warn(`[DS] Offline queue exceeds ${MAX_OFFLINE_QUEUE_SIZE / 1024}KB limit (${sizeBytes / 1024}KB). Trimming oldest items.`);
-      // Keep only newest 300 items
-      const trimmed = q.slice(Math.max(0, q.length - 300));
-      _lsSet(OFFLINE_QUEUE_KEY, JSON.stringify(trimmed));
-      return;
-    }
-    
-    if (q.length > MAX_OFFLINE_QUEUE_ITEMS) {
-      console.warn(`[DS] Offline queue > ${MAX_OFFLINE_QUEUE_ITEMS} items. Trimming to 300.`);
+    // FIX SYNC-Q1 — Limites offline queue : avertir l'utilisateur si trim nécessaire
+    if (sizeBytes > MAX_OFFLINE_QUEUE_SIZE || q.length > MAX_OFFLINE_QUEUE_ITEMS) {
+      const reason = sizeBytes > MAX_OFFLINE_QUEUE_SIZE
+        ? `taille (${Math.round(sizeBytes / 1024)} Ko > 1 Mo)`
+        : `nombre d'éléments (${q.length} > 500)`;
+      console.warn(`[DS] File offline trop volumineuse (${reason}) — éléments anciens supprimés`);
+      // Notifier l'utilisateur via un toast (si disponible)
+      try {
+        window.dispatchEvent(new CustomEvent('gc-offline-queue-overflow', {
+          detail: { reason, kept: 300, dropped: q.length - 300 }
+        }));
+      } catch {}
       const trimmed = q.slice(Math.max(0, q.length - 300));
       _lsSet(OFFLINE_QUEUE_KEY, JSON.stringify(trimmed));
       return;
@@ -806,18 +807,23 @@ export function dsStartSync(onUpdate) {
       // FIX SYNC-P1 : Toutes les 60s (6 ticks × 10s), invalider les clés critiques
       _heartbeatTick++;
       if (_heartbeatTick % 6 === 0) {
+        let invalidated = 0;
         HEARTBEAT_KEYS.forEach(k => {
           const cached = _cache.get(k);
           // N'invalider que si la donnée a plus de 45s (évite d'écraser un fetch récent)
           if (!cached || Date.now() - cached.ts > 45_000) {
             _cache.delete(k);
             _pendingFetches.delete(k);
+            invalidated++;
           }
         });
-        // Notifier les hooks pour qu'ils re-fetchent si abonnés
-        _syncListeners.forEach(fn => {
-          try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: Date.now() }); } catch {}
-        });
+        // FIX PERF-R1 — Ne notifier les hooks QUE si du cache a été réellement invalidé
+        // Évite des re-renders React inutiles sur tous les composants abonnés toutes les 60s.
+        if (invalidated > 0) {
+          _syncListeners.forEach(fn => {
+            try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: Date.now() }); } catch {}
+          });
+        }
       }
     }
     if (!nowOnline && _online) {
@@ -933,7 +939,16 @@ export async function dsGet(key, fallback = null) {
       });
 
       if (r.status === 404) return fallback; // clé absente = null propre
-      if (r.status === 401) return fallback; // [D8] Non authentifié — traiter comme clé absente (fallback)
+      if (r.status === 401) {
+        // FIX SYNC-S1 — Session expirée : notifier l'app pour déconnexion propre
+        // Au lieu de retourner silencieusement, on émet un événement que AppRoot peut intercepter.
+        try {
+          window.dispatchEvent(new CustomEvent('gc-session-expired', {
+            detail: { reason: 'jwt_401', key, ts: Date.now() }
+          }));
+        } catch {}
+        return fallback;
+      }
 
       if (r.status === 429) {
         const retryAfterRaw = Number(r.headers.get('retry-after') || 0);
@@ -1077,6 +1092,23 @@ export { dsSave as dsSet };
 export async function dsDelete(key, userId = null) {
   lsSave(key, null);
   _cache.delete(key);
+  // FIX SYNC-T1 — Tombstone au niveau clé entière pour éviter la résurrection.
+  // Si un autre client a encore la clé en cache et fait un dsSave après cette suppression,
+  // l'anti-régression serveur peut la ressusciter. On enregistre un tombstone de clé.
+  if (isSharedKey(key)) {
+    try {
+      const t = _loadTombstones();
+      t['__deleted_keys__'] = t['__deleted_keys__'] || {};
+      t['__deleted_keys__'][key] = Date.now();
+      // Garder max 200 clés supprimées
+      const keys = Object.keys(t['__deleted_keys__']);
+      if (keys.length > 200) {
+        const oldest = keys.sort((a, b) => t['__deleted_keys__'][a] - t['__deleted_keys__'][b]).slice(0, keys.length - 200);
+        oldest.forEach(k => delete t['__deleted_keys__'][k]);
+      }
+      _lsSet(TOMBSTONE_LS_KEY, JSON.stringify(t));
+    } catch {}
+  }
   if (!_online || !isSharedKey(key)) return { ok: true, local: true };
   try {
     await fetch(`${getProxyUrl()}/api/data/${encodeURIComponent(key)}`, {

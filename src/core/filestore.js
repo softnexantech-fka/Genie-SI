@@ -173,7 +173,38 @@ async function uploadToServer(file, meta) {
 }
 
 // ── IDB helpers ──────────────────────────────────────────────────────────────
+// FIX IDB-P1 — Purge automatique des fichiers IDB déjà synchronisés avant d'en ajouter un nouveau.
+// Évite le QuotaExceededError silencieux qui bloquait les uploads offline.
+const IDB_SOFT_LIMIT_MB = 100; // Déclencher purge au-dessus de 100 Mo dans IDB
+async function idbPurgeIfNeeded(requiredBytes = 0) {
+  try {
+    if (!navigator?.storage?.estimate) return;
+    const { usage, quota } = await navigator.storage.estimate();
+    const usedMB = usage / (1024 * 1024);
+    const quotaMB = quota / (1024 * 1024);
+    const percentUsed = Math.round((usage / quota) * 100);
+    // Purger si > 80% du quota OU si IDB trop chargé
+    if (percentUsed < 80 && usedMB < IDB_SOFT_LIMIT_MB) return;
+    const all = await idbGetAll();
+    if (!all?.length) return;
+    // Trier par date d'upload : les plus anciens et déjà synchronisés partent en premier
+    const purgeable = all
+      .filter(f => f.synced && !f.blob)
+      .sort((a, b) => (a.uploadedAt || '') < (b.uploadedAt || '') ? -1 : 1);
+    let purged = 0;
+    for (const f of purgeable) {
+      await idbDelete(f.id);
+      purged++;
+      // Purger jusqu'à libérer suffisamment ou max 50 fichiers
+      if (purged >= 50) break;
+    }
+    if (purged > 0) console.log(`[IDB] Purge auto : ${purged} fichiers anciens supprimés (espace libéré)`);
+  } catch {}
+}
+
 async function idbSave(fileRef) {
+  // Purge préventive avant tout save avec blob (fichier offline)
+  if (fileRef?.blob) await idbPurgeIfNeeded(fileRef.taille || 0);
   return idbRun(() => idbTransaction('readwrite'), s => s.put(fileRef));
 }
 async function idbGet(id) {
