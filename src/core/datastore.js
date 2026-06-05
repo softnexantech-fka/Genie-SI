@@ -57,6 +57,28 @@ function getProxyUrl() {
 // ✅ CRITICAL FIX: Export getProxyUrl as named export for use in Auth.jsx
 export { getProxyUrl };
 
+// ── Migration v3 : effacer les __ts__ et __svts__ stagnants en secondes ──────
+// Les anciennes versions stockaient __svts__ en secondes Unix (ex: 1780068788)
+// alors que __ts__ est en ms (ex: 1780068788123). La comparaison localWriteTs > serverKnownTs
+// était donc TOUJOURS vraie → le local bloquait toutes les mises à jour serveur.
+// Cette migration one-shot détecte et nettoie les timestamps en secondes (< 2e12).
+(function _migrateTimestamps() {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (localStorage.getItem('gc-ts-migrated-v3') === '1') return;
+    const keysToWipe = Object.keys(localStorage).filter(k => {
+      if (!k.startsWith('__ts__:') && !k.startsWith('__svts__:')) return false;
+      const v = parseInt(localStorage.getItem(k) || '0');
+      // Valeur < 2e12 ms = avant 2033 en secondes = timestamp en secondes (stale)
+      // ou valeur > 2e15 = double-multiplication stale
+      return v < 2e12 || v > 2e15;
+    });
+    keysToWipe.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem('gc-ts-migrated-v3', '1');
+    if (keysToWipe.length) console.log(`[DS] Migration v3: ${keysToWipe.length} timestamps stagnants nettoyés`);
+  } catch {}
+})();
+
 const CACHE_TTL_MS      = 30_000;  // Cache local valide 30 secondes
 const OFFLINE_QUEUE_KEY = 'gc-offline-queue-v2';
 const DS_HEALTH_TIMEOUT_MS = 10_000;
@@ -1033,9 +1055,9 @@ export async function dsGet(key, fallback = null) {
       const json = await r.json();
       const val  = json.value ?? fallback;
       _cache.set(key, { data: val, ts: Date.now() });
-      // Stocker le timestamp serveur en millisecondes pour comparaison cohérente avec __ts__
-      // Le serveur renvoie updated_at en secondes Unix → convertir en ms
-      if (json.updatedAt) try { _lsSet('__svts__:' + key, String(json.updatedAt * 1000)); } catch {}
+      // Stocker le timestamp serveur — dbGetWithMeta renvoie updatedAt déjà en ms (seconds * 1000)
+      // Ne PAS multiplier par 1000 ici car c'est déjà fait côté serveur dans dbGetWithMeta.
+      if (json.updatedAt) try { _lsSet('__svts__:' + key, String(json.updatedAt)); } catch {}
       return val;
     } catch (e) {
       if (e.name !== 'AbortError') console.warn(`[DS] Réseau ${key}:`, e.message);

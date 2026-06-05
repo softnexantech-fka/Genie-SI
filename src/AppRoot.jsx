@@ -585,9 +585,17 @@ export default function App() {
               // __svts__:key = timestamp serveur lors du dernier dsGet (ms, converti depuis secondes Unix)
               const localWriteTs  = parseInt(_lsGet('__ts__:' + key) || '0');
               const serverKnownTs = parseInt(_lsGet('__svts__:' + key) || '0');
-              // Si localWriteTs=0, jamais écrit → serveur gagne.
-              // Si serverKnownTs=0, jamais récupéré → faire confiance au serveur quand même.
-              const serverIsNewer = localWriteTs === 0 || serverKnownTs === 0 || serverKnownTs >= localWriteTs;
+              // Règles de priorité (tous en ms après migration v3) :
+              // 1. localWriteTs=0 → jamais écrit localement → serveur gagne toujours
+              // 2. serverKnownTs=0 → jamais récupéré du serveur → serveur gagne (nouvelle machine)
+              // 3. Serveur a plus d'entrées → serveur gagne (données agrégées multi-postes)
+              // 4. serverKnownTs >= localWriteTs → serveur plus récent → serveur gagne
+              // Sinon → local plus récent avec au moins autant d'entrées → push local vers serveur
+              const localVal    = lsLoad(key, fallback);
+              const localCount  = Array.isArray(localVal)  ? localVal.length  : 0;
+              const serverCount = Array.isArray(serverVal) ? serverVal.length : 0;
+              const serverHasMore = Array.isArray(serverVal) && serverCount > localCount;
+              const serverIsNewer = localWriteTs === 0 || serverKnownTs === 0 || serverHasMore || serverKnownTs >= localWriteTs;
 
               if (serverIsNewer) {
                 lsSave(key, serverVal);
@@ -595,22 +603,15 @@ export default function App() {
                 const n = Array.isArray(serverVal) ? `${serverVal.length} entrées` : 'objet';
                 console.log(`[SI] ⬇️  Hydraté depuis serveur : ${key} (${n})`);
               } else {
-                // Local plus récent → vérifier que local a au moins autant d'entrées que serveur
-                const localVal = lsLoad(key, fallback);
-                const localCount  = Array.isArray(localVal)  ? localVal.length  : 0;
-                const serverCount = Array.isArray(serverVal) ? serverVal.length : 0;
-                // Pour les clés critiques (users), le serveur gagne si le local a moins d'entrées
-                const AUTH_CRITICAL = new Set(['users', 'gc-users']);
-                const serverHasMore = AUTH_CRITICAL.has(key) && serverCount > localCount;
-                if (localVal !== null && localVal !== undefined && !serverHasMore) {
+                // Local confirmé plus récent et au moins autant d'entrées → push vers serveur
+                if (localVal !== null && localVal !== undefined) {
                   setters.forEach(fn => fn(localVal));
                   dsSave(key, localVal).catch(() => {});
                   console.log(`[SI] ⬆️  Local plus récent — push vers serveur : ${key}`);
                 } else {
-                  // Pas de local valide OU serveur a plus d'entrées → utiliser serveur
                   lsSave(key, serverVal);
                   setters.forEach(fn => fn(serverVal));
-                  console.log(`[SI] ⬇️  Serveur gagne (${serverCount} > ${localCount}) : ${key}`);
+                  console.log(`[SI] ⬇️  Fallback serveur (local vide) : ${key}`);
                 }
               }
 
