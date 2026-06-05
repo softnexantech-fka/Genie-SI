@@ -1083,6 +1083,18 @@ export async function dsSave(key, value, userId = null, options = {}) {
       startOfflineRetryLoop();
       return { ok: false, queued: true };
     }
+    // FIX FILE-SYNC-2 — Écrire __ts__:key avec le timestamp SERVEUR confirmé (updatedAt).
+    // Avant ce fix, __ts__ était écrit AVANT la réponse serveur (timestamp client).
+    // Le broadcast data_changed arrive avec updatedAt = timestamp serveur, légèrement antérieur
+    // au timestamp client (clock skew + latence réseau). Résultat : le hook ignorait tous les
+    // broadcasts car localWriteTs > broadcastTs était toujours vrai.
+    // Maintenant : on écrase __ts__ avec le timestamp serveur confirmé → comparaison cohérente.
+    try {
+      const resp = await r.clone().json().catch(() => null);
+      const confirmedTs = resp?.updatedAt || resp?.ts || _writeNow;
+      _lsSet('__ts__:' + key, String(confirmedTs));
+      _cache.set(key, { data: sendValue, ts: confirmedTs });
+    } catch {}
     // Dès qu'on réussit un save en ligne, tenter aussi de vider la file en attente.
     flushOfflineQueue().catch(() => {});
     return { ok: true, synced: true };

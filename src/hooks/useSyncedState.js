@@ -51,12 +51,21 @@ export function useSyncedState(key, fallback = null) {
         return;
       }
       if (event.key !== key) return;
-      // Ne pas écraser si notre écriture locale est plus récente que ce broadcast
-      try {
-        const localWriteTs = parseInt(_lsGet('__ts__:' + key) || '0');
-        const broadcastTs  = event.updatedAt || event.ts || 0;
-        if (localWriteTs > broadcastTs) return; // local plus récent — ignorer
-      } catch {}
+      // FIX FILE-SYNC-2 — Guard timestamp avec tolérance clock skew.
+      // Les clés de fichiers (gc-dossier-files, gc-files, gc-docs-unified) doivent TOUJOURS
+      // faire confiance au serveur : leur source de vérité est si_files table, pas localStorage.
+      // Pour les autres clés : tolérance 10s pour absorber le décalage entre timestamp client
+      // (écrit avant la réponse HTTP) et timestamp broadcast serveur.
+      const FILE_KEYS = new Set(['gc-dossier-files', 'gc-files', 'gc-docs-unified', 'gc-standalone-docs', 'gc-sirh-fichiers']);
+      if (!FILE_KEYS.has(key)) {
+        try {
+          const localWriteTs = parseInt(_lsGet('__ts__:' + key) || '0');
+          const broadcastTs  = event.updatedAt || event.ts || 0;
+          // Tolérance 10s : ignorer seulement si local est CLAIREMENT plus récent
+          if (localWriteTs > broadcastTs + 10_000) return;
+        } catch {}
+      }
+      // Pour les clés fichiers et toutes les autres clés "proches" → toujours re-fetch
       dsGet(key, fallback).then(val => {
         if (!mountedRef.current) return;
         if (val !== null && val !== undefined) {

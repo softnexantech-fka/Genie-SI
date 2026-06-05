@@ -1913,8 +1913,57 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
       try { if (fs.existsSync(meta.disk_path)) fs.unlinkSync(meta.disk_path); } catch (err) {}
       return res.status(500).json({ ok: false, error: 'Échec de l\'enregistrement des métadonnées du fichier', details: e.message });
     }
+    const uploadTs = Date.now();
     const senderSocketId = req.headers['x-socket-id'] || null;
-    broadcast('file_uploaded', { id: fileId, name: req.file.originalname, size: req.file.size, module: mod, dossierId, by: uploaderId, ts: Date.now() }, senderSocketId);
+
+    // FIX FILE-SYNC-1 — CRITIQUE : mettre à jour gc-dossier-files dans si_kv après chaque upload.
+    // Avant ce fix, les fichiers étaient dans si_files MAIS gc-dossier-files (si_kv) n'était
+    // jamais mis à jour → les autres machines fetchwaient une liste obsolète via dsGet('gc-dossier-files').
+    // Maintenant : on ajoute le nouveau fichier dans la liste KV ET on broadcast data_changed
+    // pour que tous les clients re-fetchent immédiatement la liste à jour.
+    const fileRef = {
+      id: meta.id,
+      nom: meta.original_name,
+      type: meta.mime_type,
+      taille: meta.size_bytes,
+      module: meta.module,
+      dossierId: meta.dossier_id || null,
+      uploadedBy: meta.uploaded_by,
+      uploadedAt: new Date().toISOString(),
+      synced: true,
+      serverId: meta.id,
+      serverUrl: `/api/files/${meta.id}`,
+      checksum: meta.checksum,
+    };
+    try {
+      // Mettre à jour gc-dossier-files (liste globale partagée)
+      const currentDossierFiles = (await dbGet('gc-dossier-files')) || [];
+      const updatedDossierFiles = [
+        ...currentDossierFiles.filter(f => f?.id !== meta.id), // éviter doublons
+        fileRef,
+      ];
+      await dbSet('gc-dossier-files', updatedDossierFiles, uploaderId);
+      // Broadcast data_changed pour gc-dossier-files → tous les hooks useRemoteSync se rafraîchissent
+      broadcast('data_changed', {
+        key: 'gc-dossier-files', action: 'set',
+        by: uploaderId, ts: uploadTs, updatedAt: uploadTs,
+      }, senderSocketId);
+
+      // Si module docs-unified, mettre aussi à jour gc-docs-unified
+      if (meta.module === 'docs' || meta.module === 'documents') {
+        const currentDocs = (await dbGet('gc-docs-unified')) || [];
+        const updatedDocs = [...currentDocs.filter(f => f?.id !== meta.id), fileRef];
+        await dbSet('gc-docs-unified', updatedDocs, uploaderId);
+        broadcast('data_changed', {
+          key: 'gc-docs-unified', action: 'set',
+          by: uploaderId, ts: uploadTs, updatedAt: uploadTs,
+        }, senderSocketId);
+      }
+    } catch (kvErr) {
+      console.warn('[upload] Erreur mise à jour gc-dossier-files KV:', kvErr.message);
+    }
+
+    broadcast('file_uploaded', { id: fileId, name: req.file.originalname, size: req.file.size, module: mod, dossierId, by: uploaderId, ts: uploadTs }, senderSocketId);
     logger.log(`Upload: ${req.file.originalname} (${Math.round(req.file.size/1024)} KB) by ${uploaderId}`);
     // DOSSIER-FS : copier/lier le fichier dans le dossier physique du dossier SI
     if (dossierId) {
