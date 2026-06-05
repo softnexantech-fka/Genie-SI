@@ -59,9 +59,13 @@ import helmet from 'helmet';
 import { body, validationResult } from 'express-validator';
 import compression from 'compression';
 import { createClient as createRedisClient } from 'redis';
+// archiver est CommonJS — chargé via require (createRequire défini plus bas)
+let archiver = null;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require   = createRequire(import.meta.url);
+// archiver est CommonJS — require après createRequire
+archiver = require('archiver');
 
 config({ path: path.join(__dirname, '.env') });
 
@@ -157,13 +161,170 @@ function scanFileWithClam(filePath) {
 }
 
 // ── Dossiers de données ─────────────────────────────────────────────────────
-const DATA_DIR    = process.env.DATA_DIR    || path.join(__dirname, 'data');
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
-const DB_FILE     = path.join(DATA_DIR, 'si_genie.db');
-const BACKUP_DIR  = path.join(DATA_DIR, 'backups');
+const DATA_DIR      = process.env.DATA_DIR    || path.join(__dirname, 'data');
+const UPLOADS_DIR   = process.env.UPLOADS_DIR || path.join(DATA_DIR, 'uploads');
+const DB_FILE       = path.join(DATA_DIR, 'si_genie.db');
+const BACKUP_DIR    = path.join(DATA_DIR, 'backups');
+// DOSSIER-FS : chaque dossier SI crée un sous-répertoire physique ici
+const DOSSIERS_FS_DIR = process.env.DOSSIERS_FS_DIR || path.join(DATA_DIR, 'dossiers');
 
-for (const dir of [DATA_DIR, UPLOADS_DIR, BACKUP_DIR]) {
+for (const dir of [DATA_DIR, UPLOADS_DIR, BACKUP_DIR, DOSSIERS_FS_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+// ── Surveillance disque ──────────────────────────────────────────────────────
+// DISK-MON : Surveille l'espace disque toutes les 15 min.
+// À 90% : alerte broadcast + notification persistante pour DG et Admin.
+// À 95% : alerte critique broadcast.
+const DISK_ALERT_PATH     = DATA_DIR;         // Surveiller la partition qui contient les données
+const DISK_WARN_PCT       = 90;               // Seuil alerte standard
+const DISK_CRIT_PCT       = 95;               // Seuil critique
+const DISK_CHECK_INTERVAL = 15 * 60 * 1000;  // 15 min
+let   _lastDiskAlertLevel = 'ok';             // Éviter répétition des alertes
+
+async function getDiskUsagePct(dirPath) {
+  try {
+    // statvfs n'est pas dans Node standard — on utilise df via child_process
+    const output = child_process.execSync(`df -k "${dirPath}" 2>/dev/null | tail -1`, { timeout: 5000 }).toString().trim();
+    const parts = output.split(/\s+/);
+    // Colonnes df: Filesystem, 1K-blocks, Used, Available, Use%, Mounted
+    const usePctStr = parts[4] || '0%';
+    return parseInt(usePctStr.replace('%', ''), 10) || 0;
+  } catch {
+    // Fallback : calculer à partir des tailles de dossiers
+    try {
+      const totalData = getDirSize(DATA_DIR);
+      const MAX_BYTES = (parseInt(process.env.MAX_DISK_GB || '250', 10)) * 1024 * 1024 * 1024;
+      return Math.round((totalData / MAX_BYTES) * 100);
+    } catch { return 0; }
+  }
+}
+
+async function checkDiskAndAlert() {
+  const pct = await getDiskUsagePct(DISK_ALERT_PATH);
+  const level = pct >= DISK_CRIT_PCT ? 'critical' : pct >= DISK_WARN_PCT ? 'warning' : 'ok';
+  if (level === 'ok') { _lastDiskAlertLevel = 'ok'; return; }
+  // Ne pas répéter la même alerte si déjà au même niveau
+  if (level === _lastDiskAlertLevel) return;
+  _lastDiskAlertLevel = level;
+
+  const msg = level === 'critical'
+    ? `CRITIQUE : Espace disque à ${pct}% — Intervention immédiate requise ! Sauvegardez et libérez de l'espace.`
+    : `ALERTE : Espace disque à ${pct}% — Pensez à sauvegarder ou transférer les fichiers vers un disque externe ou le cloud.`;
+
+  console.warn(`[DISK-MON] ${msg}`);
+
+  // Broadcast alerte WebSocket (tous les clients connectés)
+  io.emit('disk_alert', { level, pct, message: msg, ts: Date.now() });
+
+  // Sauvegarder une notification persistante dans la DB pour DG et Admin
+  if (dbReady) {
+    try {
+      const notifKey = 'gc-notifications';
+      const notifs = (await dbGet(notifKey)) || [];
+      const notifId = `DISK-${Date.now()}`;
+      const newNotif = {
+        id: notifId,
+        type: level === 'critical' ? 'critical' : 'warning',
+        icon: level === 'critical' ? 'server-crash' : 'hard-drive',
+        message: msg,
+        module: 'system',
+        target: 'admin_dg',  // Visible uniquement par admin + DG
+        at: new Date().toISOString(),
+        read: false,
+        persistent: true,
+      };
+      const updated = [newNotif, ...notifs].slice(0, 500);
+      await dbSet(notifKey, updated, 'system');
+      // Broadcast notification data_changed
+      io.emit('data_changed', { key: notifKey, action: 'set', by: 'system', ts: Date.now() });
+    } catch (e) { console.warn('[DISK-MON] Erreur sauvegarde notification:', e.message); }
+  }
+}
+
+// Démarrer la surveillance disque (après que io et dbReady soient initialisés)
+function startDiskMonitoring() {
+  checkDiskAndAlert().catch(() => {});
+  setInterval(() => checkDiskAndAlert().catch(() => {}), DISK_CHECK_INTERVAL);
+}
+
+// ── Dossier physique par dossier SI ──────────────────────────────────────────
+// DOSSIER-FS : Crée/met à jour le dossier physique et le README pour un dossier SI.
+function sanitizeFolderName(name) {
+  return (name || 'sans-nom')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // enlever accents
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')           // caractères interdits
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .slice(0, 80)
+    .trim() || 'dossier';
+}
+
+function getDossierFsPath(dossierId, dossierName) {
+  const safeName = sanitizeFolderName(dossierName);
+  return path.join(DOSSIERS_FS_DIR, `${dossierId}_${safeName}`);
+}
+
+async function ensureDossierFolder(dossier) {
+  if (!dossier?.id) return null;
+  const folderPath = getDossierFsPath(dossier.id, dossier.nom || dossier.title || dossier.id);
+  const filesPath  = path.join(folderPath, 'fichiers');
+  try {
+    fs.mkdirSync(folderPath, { recursive: true });
+    fs.mkdirSync(filesPath,  { recursive: true });
+    // Écrire/mettre à jour le README.md
+    const readmePath = path.join(folderPath, 'README.md');
+    const now = new Date().toISOString();
+    const readme = [
+      `# Dossier SI : ${dossier.nom || dossier.title || dossier.id}`,
+      '',
+      `**Identifiant :** \`${dossier.id}\``,
+      `**Référence :** ${dossier.reference || dossier.ref || '—'}`,
+      `**Statut :** ${dossier.status || dossier.statut || '—'}`,
+      `**Type :** ${dossier.type || dossier.categorie || '—'}`,
+      `**Responsable :** ${dossier.responsable || dossier.assignedTo || '—'}`,
+      `**Processus :** ${dossier.processus || dossier.process || '—'}`,
+      `**Date création :** ${dossier.createdAt || dossier.dateCreation || '—'}`,
+      `**Dernière modification :** ${now}`,
+      '',
+      `## Description`,
+      '',
+      dossier.description || dossier.notes || '_Aucune description._',
+      '',
+      `## Contenu du dossier`,
+      '',
+      '> Les fichiers associés à ce dossier se trouvent dans le sous-répertoire `fichiers/`.',
+      '> Ce fichier est généré automatiquement par le SI Génie Consultant.',
+      '',
+      `---`,
+      `*Exporté le ${now} depuis SI Génie Consultant*`,
+    ].join('\n');
+    fs.writeFileSync(readmePath, readme, 'utf8');
+    return folderPath;
+  } catch (e) {
+    console.warn(`[DOSSIER-FS] Erreur création dossier physique ${dossier.id}:`, e.message);
+    return null;
+  }
+}
+
+// Copier un fichier uploadé dans le dossier physique du dossier SI
+async function linkFileToDossierFolder(dossierId, dossierName, fileId, originalName, diskPath) {
+  if (!dossierId || !diskPath || !fs.existsSync(diskPath)) return;
+  try {
+    const folderPath = getDossierFsPath(dossierId, dossierName || dossierId);
+    const filesPath  = path.join(folderPath, 'fichiers');
+    fs.mkdirSync(filesPath, { recursive: true });
+    // Utiliser un lien dur (hard link) pour éviter la duplication d'espace disque
+    const safeName = sanitizeFolderName(path.parse(originalName).name) + path.extname(originalName).toLowerCase();
+    const destPath = path.join(filesPath, `${fileId}_${safeName}`);
+    try {
+      fs.linkSync(diskPath, destPath); // Hard link — 0 octet supplémentaire
+    } catch {
+      fs.copyFileSync(diskPath, destPath); // Fallback copie si cross-device
+    }
+  } catch (e) {
+    console.warn(`[DOSSIER-FS] Erreur liaison fichier:`, e.message);
+  }
 }
 
 // ── Clés partagées ──────────────────────────────────────────────────────────
@@ -1605,6 +1766,16 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     const data = jsonLoad(); data[key] = writeValue; jsonSave(data);
   }
 
+  // DOSSIER-FS : si on sauvegarde la liste des dossiers, créer les dossiers physiques manquants
+  if ((key === 'dossiers' || key === 'gc-dossiers') && Array.isArray(writeValue)) {
+    setImmediate(async () => {
+      for (const dossier of writeValue.slice(0, 200)) {
+        if (!dossier?.id) continue;
+        await ensureDossierFolder(dossier).catch(() => {});
+      }
+    });
+  }
+
   // [C8] Exclure l'expéditeur du broadcast via X-Socket-Id header
   const senderSocketId = req.headers['x-socket-id'] || null;
   const writeTs = Date.now();
@@ -1744,7 +1915,22 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
     }
     const senderSocketId = req.headers['x-socket-id'] || null;
     broadcast('file_uploaded', { id: fileId, name: req.file.originalname, size: req.file.size, module: mod, dossierId, by: uploaderId, ts: Date.now() }, senderSocketId);
-    console.log(`📁 Upload: ${req.file.originalname} (${Math.round(req.file.size/1024)} KB) by ${uploaderId}`);
+    logger.log(`Upload: ${req.file.originalname} (${Math.round(req.file.size/1024)} KB) by ${uploaderId}`);
+    // DOSSIER-FS : copier/lier le fichier dans le dossier physique du dossier SI
+    if (dossierId) {
+      try {
+        // Chercher le nom du dossier pour nommer le répertoire
+        let dossierName = dossierId;
+        if (dbReady) {
+          const dossiers = await dbGet('dossiers') || await dbGet('gc-dossiers');
+          if (Array.isArray(dossiers)) {
+            const d = dossiers.find(x => x.id === dossierId);
+            if (d) dossierName = d.nom || d.title || d.name || dossierId;
+          }
+        }
+        await linkFileToDossierFolder(dossierId, dossierName, fileId, req.file.originalname, meta.disk_path);
+      } catch {}
+    }
     res.json({ ok: true, file: {
       id: meta.id,
       filename: meta.filename,
@@ -2150,6 +2336,131 @@ app.get('/api/sync/key-counts', rateLimiter(10), authenticateToken, async (req, 
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Export ZIP ───────────────────────────────────────────────────────────────
+// DISK-ZIP-1 : Télécharger un dossier SI complet en ZIP (README + fichiers)
+app.get('/api/export/dossier/:id/zip', rateLimiter(5, 60_000), authenticateToken, async (req, res) => {
+  const dossierId = req.params.id;
+  if (!dossierId || !/^[A-Za-z0-9_-]{1,80}$/.test(dossierId)) {
+    return res.status(400).json({ error: 'ID dossier invalide' });
+  }
+  if (!dbReady) return res.status(503).json({ error: 'DB indisponible' });
+
+  try {
+    // Récupérer les métadonnées du dossier
+    const dossiers = await dbGet('dossiers') || await dbGet('gc-dossiers') || [];
+    const dossier = Array.isArray(dossiers) ? dossiers.find(d => d.id === dossierId) : null;
+    const dossierName = dossier ? (dossier.nom || dossier.title || dossierId) : dossierId;
+
+    // Récupérer les fichiers associés
+    const sql = 'SELECT id, original_name, disk_path, compressed_path, compressed, mime_type, size_bytes, uploaded_by, uploaded_at FROM si_files WHERE dossier_id=? AND deleted=0';
+    const files = dbMode === 'sqlite3' ? await allAsync(sql, [dossierId]) : db.prepare(sql).all(dossierId);
+
+    await auditLog(req.user?.id || 'anon', 'EXPORT_ZIP', 'dossier', `Export ZIP dossier ${dossierId}`, req.ip);
+
+    const safeDossierName = sanitizeFolderName(dossierName);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="dossier_${safeDossierName}_${dossierId}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', err => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
+    archive.pipe(res);
+
+    // README.md du dossier
+    if (dossier) {
+      await ensureDossierFolder(dossier);
+    }
+    const folderPath = getDossierFsPath(dossierId, dossierName);
+    const readmePath = path.join(folderPath, 'README.md');
+    if (fs.existsSync(readmePath)) {
+      archive.file(readmePath, { name: 'README.md' });
+    } else {
+      // Générer un README minimal
+      const readmeContent = `# Dossier : ${dossierName}\n\nID: ${dossierId}\nExporté le: ${new Date().toISOString()}\n`;
+      archive.append(readmeContent, { name: 'README.md' });
+    }
+
+    // Métadonnées JSON du dossier
+    const metaJson = JSON.stringify({ dossier: dossier || { id: dossierId }, files: files || [], exportedAt: new Date().toISOString() }, null, 2);
+    archive.append(metaJson, { name: 'metadata.json' });
+
+    // Fichiers du dossier
+    for (const f of (files || [])) {
+      const diskPath = f.compressed ? f.compressed_path : f.disk_path;
+      if (!diskPath) continue;
+      const realPath = path.resolve(diskPath);
+      const uploadsRoot = path.resolve(UPLOADS_DIR);
+      if (!realPath.startsWith(uploadsRoot)) continue; // Sécurité anti path-traversal
+      if (!fs.existsSync(realPath)) continue;
+      const safeName = sanitizeFolderName(path.parse(f.original_name).name) + path.extname(f.original_name).toLowerCase();
+      archive.file(realPath, { name: `fichiers/${f.id}_${safeName}` });
+    }
+
+    await archive.finalize();
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// DISK-ZIP-2 : Export ZIP global (tous les dossiers + backup JSON)
+app.get('/api/export/all/zip', rateLimiter(2, 60_000), authenticateToken, async (req, res) => {
+  if ((req.user?.level || 0) < 4 && !req.user?.isAdmin) {
+    return res.status(403).json({ error: 'Niveau 4 ou admin requis pour l\'export global' });
+  }
+  if (!dbReady) return res.status(503).json({ error: 'DB indisponible' });
+
+  try {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="GC_SI_Export_Complet_${dateStr}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.on('error', err => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
+    archive.pipe(res);
+
+    // Backup JSON de toutes les données
+    const allData = await dbGetAll();
+    archive.append(JSON.stringify({ version: PROXY_VERSION, exportedAt: new Date().toISOString(), data: allData }, null, 2), { name: 'backup_donnees.json' });
+
+    // Arborescence des dossiers physiques
+    if (fs.existsSync(DOSSIERS_FS_DIR)) {
+      archive.directory(DOSSIERS_FS_DIR, 'dossiers_SI');
+    }
+
+    // Fichiers uploadés (avec structure année/mois préservée)
+    if (fs.existsSync(UPLOADS_DIR)) {
+      archive.directory(UPLOADS_DIR, 'fichiers_uploads');
+    }
+
+    await auditLog(req.user?.id || 'anon', 'EXPORT_ZIP_ALL', 'system', 'Export ZIP global', req.ip);
+    await archive.finalize();
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// DISK-STAT : Statut espace disque pour le panneau admin
+app.get('/api/disk/status', rateLimiter(20), authenticateToken, async (req, res) => {
+  try {
+    const pct  = await getDiskUsagePct(DISK_ALERT_PATH);
+    const uploadsSize = getDirSize(UPLOADS_DIR);
+    const dossiersSize = getDirSize(DOSSIERS_FS_DIR);
+    const dbSize = fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).size : 0;
+    res.json({
+      ok: true,
+      diskUsedPct: pct,
+      level: pct >= DISK_CRIT_PCT ? 'critical' : pct >= DISK_WARN_PCT ? 'warning' : 'ok',
+      uploadsDirBytes: uploadsSize,
+      dossiersDirBytes: dossiersSize,
+      dbFileBytes: dbSize,
+      totalDataBytes: uploadsSize + dossiersSize + dbSize,
+      maxDiskGB: parseInt(process.env.MAX_DISK_GB || '250', 10),
+      alertThreshold: DISK_WARN_PCT,
+      criticalThreshold: DISK_CRIT_PCT,
+      ts: Date.now(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Backup ───────────────────────────────────────────────────────────────────
@@ -2565,18 +2876,21 @@ async function start() {
   server.listen(PORT, '0.0.0.0', () => {
     console.log('\n');
     console.log('  ┌──────────────────────────────────────────────────────────┐');
-    console.log(`  │  🚀 SI Génie Consultant — Proxy v${PROXY_VERSION}                    │`);
-    console.log(`  │     Port     : ${PORT}                                  │`);
-    console.log(`  │     Base DB  : ${dbMode} — ${path.basename(DB_FILE)}  │`);
-    console.log(`  │     Fichiers : ${UPLOADS_DIR.slice(-40)}  │`);
-    console.log(`  │     Max DB   : ${MAX_DB_GB} GB — Max valeur : ${MAX_VALUE_MB} MB         │`);
+    console.log(`  │  SI Génie Consultant — Proxy v${PROXY_VERSION}                       │`);
+    console.log(`  │     Port      : ${PORT}                                 │`);
+    console.log(`  │     Base DB   : ${dbMode} — ${path.basename(DB_FILE)}  │`);
+    console.log(`  │     Fichiers  : ${UPLOADS_DIR.slice(-40)}  │`);
+    console.log(`  │     Dossiers  : ${DOSSIERS_FS_DIR.slice(-40)}  │`);
+    console.log(`  │     Max disk  : ${MAX_DB_GB} GB — Alerte disque : ${DISK_WARN_PCT}%      │`);
     console.log(`  │     WebSocket : actif (sync temps réel)                  │`);
     console.log(`  │     Backup auto : toutes les 6h                          │`);
-    console.log(`  │     WAL checkpoint : toutes les 5 min                   │`);
+    console.log(`  │     Surveillance disque : toutes les 15 min              │`);
     console.log('  └──────────────────────────────────────────────────────────┘');
     console.log(`\n  Accès local  : http://localhost:${PORT}`);
-    console.log(`  Accès réseau : http://[VOTRE_IP]:${PORT}`);
+    console.log(`\n  Dossiers SI  : ${DOSSIERS_FS_DIR}`);
     console.log(`  Frontend SI  : http://localhost:4173\n`);
+    // Démarrer la surveillance disque maintenant que io et db sont prêts
+    startDiskMonitoring();
   });
 }
 

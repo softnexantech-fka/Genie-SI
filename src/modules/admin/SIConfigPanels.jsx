@@ -522,8 +522,27 @@ export function ExportBackupPanel({
         </div>
       </div>
 
+      {/* Export ZIP complet */}
+      <div style={{ background:T.surface2, border:'1px solid #06B6D433', borderRadius:12, padding:14, marginBottom:12 }}>
+        <div style={{ color:'#06B6D4', fontWeight:700, fontSize:13, marginBottom:8 }}>Export ZIP (dossiers + fichiers)</div>
+        <div style={{ color:T.textMuted, fontSize:10, marginBottom:10 }}>
+          Télécharge un fichier ZIP complet : dossiers SI avec README.md, métadonnées JSON et fichiers attachés. Idéal pour archivage disque externe ou cloud.
+        </div>
+        <button onClick={() => {
+          const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+          try {
+            const proxyUrl = JSON.parse(_lsGet('gc-ai-proxy-url') || 'null') || 'http://localhost:3001';
+            window.open(`${proxyUrl}/api/export/all/zip`, '_blank');
+          } catch {
+            window.open(`http://localhost:3001/api/export/all/zip`, '_blank');
+          }
+        }} style={{ width:'100%', background:'linear-gradient(135deg,#06B6D4,#0891B2)', border:'none', color:'#fff', borderRadius:8, padding:'10px', cursor:'pointer', fontWeight:800, fontSize:12 }}>
+          Télécharger ZIP complet (dossiers + fichiers + JSON)
+        </button>
+      </div>
+
       <div style={{ background:T.surface2, border:'1px solid #F59E0B33', borderRadius:12, padding:14 }}>
-        <div style={{ color:'#F59E0B', fontWeight:700, fontSize:13, marginBottom:8 }}>📥 Importer une sauvegarde</div>
+        <div style={{ color:'#F59E0B', fontWeight:700, fontSize:13, marginBottom:8 }}>Importer une sauvegarde</div>
         <div style={{ background:'#EF444415', border:'1px solid #EF444433', borderRadius:8, padding:'8px 12px', fontSize:11, color:'#EF4444', fontWeight:600, marginBottom:10 }}>
           ⚠️ L'import remplacera TOUTES les données. Exportez d'abord !
         </div>
@@ -553,6 +572,7 @@ export function SyncControlPanel({ T, currentUser }) {
   const [serverInfo,  setServerInfo]  = React.useState(null);
   const [keyCounts,   setKeyCounts]   = React.useState(null);
   const [fileStats,   setFileStats]   = React.useState(null);
+  const [diskStatus,  setDiskStatus]  = React.useState(null);
   const [loading,     setLoading]     = React.useState('');
   const [log,         setLog]         = React.useState([]);
   const _dlg = useDialog();
@@ -571,6 +591,23 @@ export function SyncControlPanel({ T, currentUser }) {
   // Charger les stats fichiers IDB au montage
   React.useEffect(() => {
     gcFileStats().then(s => setFileStats(s)).catch(() => {});
+  }, []);
+
+  // Charger le statut disque serveur au montage
+  React.useEffect(() => {
+    const fetchDisk = async () => {
+      try {
+        const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+        const st = dsGetSyncStatus();
+        const r = await fetch(`${st.proxyUrl || 'http://localhost:3001'}/api/disk/status`, {
+          headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(8000)
+        });
+        if (r.ok) setDiskStatus(await r.json());
+      } catch {}
+    };
+    fetchDisk();
+    const iv = setInterval(fetchDisk, 60_000); // Actualiser toutes les minutes
+    return () => clearInterval(iv);
   }, []);
 
   const fetchServerInfo = async () => {
@@ -768,6 +805,56 @@ export function SyncControlPanel({ T, currentUser }) {
           </div>
         </div>
       )}
+
+      {/* Espace disque serveur */}
+      {diskStatus && (
+        <div style={{ background: diskStatus.level === 'critical' ? '#EF444410' : diskStatus.level === 'warning' ? '#F59E0B10' : T.surface2,
+          border: `1px solid ${diskStatus.level === 'critical' ? '#EF4444' : diskStatus.level === 'warning' ? '#F59E0B' : '#22C55E'}33`,
+          borderRadius:12, padding:14, marginBottom:12 }}>
+          <div style={{ color: diskStatus.level === 'critical' ? '#EF4444' : diskStatus.level === 'warning' ? '#F59E0B' : '#22C55E',
+            fontWeight:700, fontSize:12, marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+            {diskStatus.level === 'critical' ? 'Espace disque CRITIQUE' : diskStatus.level === 'warning' ? 'Alerte espace disque' : 'Espace disque'}
+            <span style={{ fontWeight:400, fontSize:11, color:T.textMuted }}>— Serveur ({diskStatus.maxDiskGB} Go total)</span>
+          </div>
+          <div style={{ background:T.surface3, borderRadius:99, height:10, overflow:'hidden', marginBottom:8 }}>
+            <div style={{ width:`${Math.min(diskStatus.diskUsedPct,100)}%`, height:'100%', borderRadius:99, transition:'width .3s',
+              background: diskStatus.diskUsedPct >= 95 ? '#EF4444' : diskStatus.diskUsedPct >= 90 ? '#F59E0B' : '#22C55E' }}/>
+          </div>
+          <div style={{ display:'flex', gap:16, flexWrap:'wrap', fontSize:11, color:T.textMuted }}>
+            <span>Utilisé : <strong style={{color:T.text}}>{diskStatus.diskUsedPct}%</strong></span>
+            <span>Fichiers uploads : <strong style={{color:T.text}}>{(diskStatus.uploadsDirBytes/1024/1024/1024).toFixed(2)} Go</strong></span>
+            <span>Dossiers SI : <strong style={{color:T.text}}>{(diskStatus.dossiersDirBytes/1024/1024/1024).toFixed(2)} Go</strong></span>
+            <span>Base SQLite : <strong style={{color:T.text}}>{(diskStatus.dbFileBytes/1024/1024).toFixed(1)} Mo</strong></span>
+          </div>
+          {diskStatus.level !== 'ok' && (
+            <div style={{ marginTop:8, fontSize:11, color: diskStatus.level === 'critical' ? '#EF4444' : '#F59E0B', fontWeight:600 }}>
+              Pensez à sauvegarder vers un disque externe ou exporter en ZIP via les boutons ci-dessous.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Export ZIP */}
+      <div style={{ background:T.surface2, border:'1px solid #06B6D433', borderRadius:12, padding:14, marginBottom:12 }}>
+        <div style={{ color:'#06B6D4', fontWeight:700, fontSize:12, marginBottom:8 }}>Export ZIP avec arborescence</div>
+        <div style={{ color:T.textMuted, fontSize:10, marginBottom:10 }}>
+          Chaque dossier SI exporté contient : README.md (métadonnées), metadata.json et tous ses fichiers attachés.
+        </div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <button onClick={async () => {
+            const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+            const st = dsGetSyncStatus();
+            window.open(`${st.proxyUrl || 'http://localhost:3001'}/api/export/all/zip?token=${tok}`, '_blank');
+            addLog('Export ZIP global lancé', 'success');
+          }} style={{ background:'#06B6D422', border:'1px solid #06B6D444', color:'#06B6D4', borderRadius:8, padding:'8px 14px', cursor:'pointer', fontWeight:700, fontSize:11 }}>
+            Exporter tout en ZIP (dossiers + fichiers + backup JSON)
+          </button>
+        </div>
+        <div style={{ color:T.textMuted, fontSize:10, marginTop:8 }}>
+          L'export global inclut : tous les dossiers SI avec leurs fichiers, la base SQLite en JSON, l'arborescence physique des dossiers.
+          Niveau 4+ requis.
+        </div>
+      </div>
 
       {/* Comparaison clés serveur/local */}
       {keyCounts && (

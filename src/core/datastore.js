@@ -639,6 +639,13 @@ async function initWebSocket() {
       } catch {}
     });
 
+    // DISK-MON — Alerte espace disque serveur : relayer vers CustomEvent pour AppRoot
+    _socket.on('disk_alert', (data) => {
+      try {
+        window.dispatchEvent(new CustomEvent('gc-disk-alert', { detail: data }));
+      } catch {}
+    });
+
     // FIX SYNC-A2 — Resync global déclenché par l'admin : vider le cache + notifier hooks
     _socket.on('resync_all', ({ by, ts, reason }) => {
       console.log(`[DS] Resync global demandé par ${by} (${reason})`);

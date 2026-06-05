@@ -174,17 +174,17 @@ async function uploadToServer(file, meta) {
 
 // ── IDB helpers ──────────────────────────────────────────────────────────────
 // FIX IDB-P1 — Purge automatique des fichiers IDB déjà synchronisés avant d'en ajouter un nouveau.
-// Évite le QuotaExceededError silencieux qui bloquait les uploads offline.
-const IDB_SOFT_LIMIT_MB = 100; // Déclencher purge au-dessus de 100 Mo dans IDB
+// L'IDB est un cache navigateur temporaire pour les fichiers offline.
+// Les 250 Go sont sur le SERVEUR (disk). Ici on gère seulement le cache local navigateur.
+// On purge UNIQUEMENT les fichiers déjà synchros (ceux qui sont sur le serveur)
+// quand le quota navigateur dépasse 85% — les fichiers en attente de sync ne sont jamais purgés.
 async function idbPurgeIfNeeded(requiredBytes = 0) {
   try {
     if (!navigator?.storage?.estimate) return;
     const { usage, quota } = await navigator.storage.estimate();
-    const usedMB = usage / (1024 * 1024);
-    const quotaMB = quota / (1024 * 1024);
     const percentUsed = Math.round((usage / quota) * 100);
-    // Purger si > 80% du quota OU si IDB trop chargé
-    if (percentUsed < 80 && usedMB < IDB_SOFT_LIMIT_MB) return;
+    // Seuil conservateur : 85% du quota navigateur (qui peut être plusieurs Go)
+    if (percentUsed < 85) return;
     const all = await idbGetAll();
     if (!all?.length) return;
     // Trier par date d'upload : les plus anciens et déjà synchronisés partent en premier
@@ -599,6 +599,21 @@ export async function gcFileStats() {
     idb: { count: idbCount, totalSizeMB: parseFloat(idbTotalSizeMB) },
     proxy
   };
+}
+
+/**
+ * DISK-ZIP : URL pour télécharger un dossier SI en ZIP depuis le serveur.
+ * L'URL est directe (utilise le serveur backend, pas le frontend).
+ */
+export function gcDossierZipUrl(dossierId) {
+  return fileApiUrl(`/api/export/dossier/${encodeURIComponent(dossierId)}/zip`);
+}
+
+/**
+ * DISK-ZIP : URL pour l'export ZIP global complet (admin uniquement).
+ */
+export function gcExportAllZipUrl() {
+  return fileApiUrl('/api/export/all/zip');
 }
 
 /**

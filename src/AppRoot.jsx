@@ -983,11 +983,27 @@ export default function App() {
       } catch {}
     };
 
+    // DISK-MON : Alerte espace disque serveur (broadcast WebSocket depuis le serveur)
+    const onDiskAlert = (e) => {
+      const { level, pct, message } = e?.detail || e || {};
+      console.warn(`[SI] Alerte disque serveur : ${pct}% (${level})`);
+      try {
+        import('./components/ToastManager.jsx').then(({ gcToast }) => {
+          if (!gcToast) return;
+          const fn = level === 'critical' ? gcToast.error : gcToast.warning;
+          if (fn) fn(message || `Espace disque serveur à ${pct}%`);
+        }).catch(() => {});
+      } catch {}
+    };
+    // Écouter l'event WebSocket disk_alert relayé depuis datastore via CustomEvent
+    window.addEventListener('gc-disk-alert', onDiskAlert);
+
     window.addEventListener('gc-session-expired', onSessionExpired);
     window.addEventListener('gc-offline-queue-overflow', onQueueOverflow);
     return () => {
       window.removeEventListener('gc-session-expired', onSessionExpired);
       window.removeEventListener('gc-offline-queue-overflow', onQueueOverflow);
+      window.removeEventListener('gc-disk-alert', onDiskAlert);
     };
   }, []);
 
