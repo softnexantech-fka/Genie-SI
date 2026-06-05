@@ -685,8 +685,10 @@ export function SyncControlPanel({ T, currentUser }) {
     let pushed = 0, skipped = 0;
     const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
     const proxyUrl = status?.proxyUrl || 'http://localhost:3001';
+    const AUTH_SENSITIVE_KEYS = new Set(['gc-users', 'users']);
     for (const key of SHARED_KEYS) {
       try {
+        if (AUTH_SENSITIVE_KEYS.has(key)) { skipped++; continue; }
         const raw = _lsGet(key);
         if (!raw) { skipped++; continue; }
         const val = JSON.parse(raw);

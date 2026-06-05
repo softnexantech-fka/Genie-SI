@@ -1358,7 +1358,19 @@ app.post('/api/auth/login', [
       }
     }
 
-    if (!user || !(await verifyPassword(password, user.passwordHash || ''))) {
+    let authOk = user && (await verifyPassword(password, user.passwordHash || ''));
+    if (!authOk && user && !user.passwordHash) {
+      // Hash vide (écrasé par un push client stale) → tenter le mot de passe par défaut (6 derniers chars de l'ID)
+      const defaultPwd = user.id ? user.id.slice(-6) : '';
+      if (defaultPwd && password === defaultPwd) {
+        user.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await dbSet('gc-users', gcUsers);
+        console.log(`[HASH-RECOVERY] Hash régénéré pour ${user.id}`);
+        failedLogins.delete(username);
+        authOk = true;
+      }
+    }
+    if (!user || !authOk) {
       // [FIX-LOCKOUT-INCREMENT] Track failed login
       const newFailCount = (lockInfo?.count || 0) + 1;
       if (newFailCount >= LOCKOUT_THRESHOLD) {
