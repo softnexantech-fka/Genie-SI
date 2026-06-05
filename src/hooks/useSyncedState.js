@@ -91,7 +91,7 @@ export function useSyncedState(key, fallback = null) {
       window.removeEventListener('gc-sync-online', handleOnline);
       window.removeEventListener('storage', handleStorage);
     };
-  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [key]); // key est la seule dépendance stable voulue — fallback intentionnellement omis
 
   const setSyncedData = useCallback((value) => {
     const resolved = typeof value === 'function' ? value(data) : value;

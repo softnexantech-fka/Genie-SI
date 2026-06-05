@@ -253,6 +253,7 @@ function startDiskMonitoring() {
 function sanitizeFolderName(name) {
   return (name || 'sans-nom')
     .normalize('NFD').replace(/[̀-ͯ]/g, '') // enlever accents
+    // eslint-disable-next-line no-control-regex
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')           // caractères interdits
     .replace(/\s+/g, '_')
     .replace(/_+/g, '_')
@@ -407,7 +408,8 @@ function isAllowedKey(key) {
   if (!key || typeof key !== 'string') return false;
   if (key.length > KEY_MAX_LENGTH) return false;
   // Bloquer caractères dangereux (/, \, .., null bytes, etc.)
-  if (/[\/\\\x00]/.test(key) || key.includes('..')) return false;
+  // eslint-disable-next-line no-control-regex, no-useless-escape
+  if (/[/\\\x00]/.test(key) || key.includes('..')) return false;
   if (ALLOWED_KEYS.has(key)) return true;
   if (key.startsWith('gc-notif-')) {
     const suffix = key.slice('gc-notif-'.length);
@@ -477,7 +479,7 @@ const _sanitizeForLog = (msg) => {
     try { msg = JSON.stringify(msg); } catch { msg = String(msg); }
   }
   return msg
-    .replace(/Bearer\s+[\w.\-]+/gi, 'Bearer [REDACTED]')
+    .replace(/Bearer\s+[\w.+-]+/gi, 'Bearer [REDACTED]')
     .replace(/"password"\s*:\s*"[^"]*"/g, '"password":"[REDACTED]"')
     .replace(/"passwordHash"\s*:\s*"[^"]*"/g, '"passwordHash":"[REDACTED]"')
     .replace(/"token"\s*:\s*"[^"]*"/g, '"token":"[REDACTED]"');
@@ -2317,16 +2319,16 @@ app.get('/api/sync/status', rateLimiter(30), authenticateToken, async (req, res)
     let keyCount = 0, fileCount = 0, lastUpdate = null;
     if (dbReady) {
       const row = dbMode === 'sqlite3'
-        ? await getAsync('SELECT COUNT(*) as cnt FROM si_kv')
-        : db.prepare('SELECT COUNT(*) as cnt FROM si_kv').get();
+        ? await getAsync('SELECT COUNT(*) as cnt FROM si_data')
+        : db.prepare('SELECT COUNT(*) as cnt FROM si_data').get();
       keyCount = row?.cnt || 0;
       const fRow = dbMode === 'sqlite3'
         ? await getAsync('SELECT COUNT(*) as cnt FROM si_files WHERE deleted=0')
         : db.prepare('SELECT COUNT(*) as cnt FROM si_files WHERE deleted=0').get();
       fileCount = fRow?.cnt || 0;
       const uRow = dbMode === 'sqlite3'
-        ? await getAsync('SELECT MAX(updated_at) as last FROM si_kv')
-        : db.prepare('SELECT MAX(updated_at) as last FROM si_kv').get();
+        ? await getAsync('SELECT MAX(updated_at) as last FROM si_data')
+        : db.prepare('SELECT MAX(updated_at) as last FROM si_data').get();
       lastUpdate = uRow?.last || null;
     }
     res.json({
@@ -2368,8 +2370,8 @@ app.get('/api/sync/key-counts', rateLimiter(10), authenticateToken, async (req, 
   if (!dbReady) return res.status(503).json({ error: 'DB indisponible' });
   try {
     const rows = dbMode === 'sqlite3'
-      ? await allAsync('SELECT key, updated_at, updated_by FROM si_kv ORDER BY updated_at DESC LIMIT 200')
-      : db.prepare('SELECT key, updated_at, updated_by FROM si_kv ORDER BY updated_at DESC LIMIT 200').all();
+      ? await allAsync('SELECT key, updated_at, updated_by FROM si_data ORDER BY updated_at DESC LIMIT 200')
+      : db.prepare('SELECT key, updated_at, updated_by FROM si_data ORDER BY updated_at DESC LIMIT 200').all();
     const counts = {};
     for (const row of rows) {
       try {
