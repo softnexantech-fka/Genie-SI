@@ -1232,6 +1232,13 @@ io.on('connection', (socket) => {
     console.log(`📥 Flush offline: ${synced}/${batch.length} items by ${verifiedUserId}`);
   });
 
+  // COLLECT-PUSH — Le client signale qu'il a terminé de pousser ses données
+  socket.on('push_complete', ({ collectId, pushed }) => {
+    const info = connectedClients.get(socket.id);
+    if (info) info.pushComplete = true;
+    console.log(`[COLLECT] ${info?.userId || socket.id} a poussé ${pushed} clés (collectId=${collectId})`);
+  });
+
   socket.on('disconnect', () => {
     connectedClients.delete(socket.id);
     console.log(`🔌 Déconnecté: ${socket.id} — total: ${connectedClients.size}`);
@@ -1650,6 +1657,13 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
   // On préserve les entrées existantes non présentes dans l'entrant (identifiées par .id).
   // Les tombstones sont respectés pour éviter la résurrection d'éléments supprimés.
   // ─────────────────────────────────────────────────────────────────────────────────────────
+  // Clés métier critiques : toujours faire union-merge (jamais écraser aveuglément)
+  const MERGE_ALWAYS_KEYS = new Set([
+    'dossiers', 'gc-dossiers', 'taches', 'gc-taches', 'rdvs', 'gc-rdvs',
+    'partners', 'gc-partners', 'gc-dossier-files', 'gc-files', 'gc-docs-unified',
+    'gc-standalone-docs', 'gc-messages', 'gc-notifications',
+  ]);
+
   let finalValue = sanitized;
   if (
     isArrayOfObjectsWithIds(sanitized) &&
@@ -1657,8 +1671,14 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
   ) {
     try {
       const existing = await dbGet(key);
-      // FIX BUG-SYNC-1 — Seuil abaissé : >= 2 items ET < 70% (au lieu de > 10 ET < 80%)
-      if (Array.isArray(existing) && existing.length >= 2 && sanitized.length < existing.length * 0.7) {
+      // Pour MERGE_ALWAYS_KEYS : union-merge dès qu'il y a des données existantes (pas de seuil %)
+      // Pour les autres : seuil < 70% (défensif)
+      const shouldMerge = Array.isArray(existing) && existing.length >= 2 && (
+        MERGE_ALWAYS_KEYS.has(key)
+          ? true  // union-merge systématique pour clés métier
+          : sanitized.length < existing.length * 0.7
+      );
+      if (shouldMerge) {
         const incomingIds = new Set(sanitized.map(item => item?.id).filter(Boolean));
         let tombstonedIds = new Set();
         try {
@@ -1667,13 +1687,25 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
             (tombstones[key] || []).forEach(id => tombstonedIds.add(String(id)));
           }
         } catch (_) {}
+        // Items du serveur absents de l'entrant (et non-tombstonés) → à préserver
         const preserved = existing.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
-        if (preserved.length > 0) {
-          // FIX BUG-B5 — Déduplication par ID après merge pour éviter les doublons
-          // (un même id peut apparaître dans sanitized par erreur).
-          const merged = [...sanitized, ...preserved];
+        // Filtrer aussi l'entrant lui-même (exclure tombstonés dans l'entrant)
+        const filteredSanitized = sanitized.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
+        // Pour les conflits (même ID dans entrant ET serveur) : garder la version la plus récente
+        const existingById = new Map(existing.map(i => [String(i?.id), i]));
+        const resolvedIncoming = filteredSanitized.map(item => {
+          if (!item?.id) return item;
+          const serverItem = existingById.get(String(item.id));
+          if (!serverItem) return item;
+          const incomingTs = item.updatedAt || item.modifiedAt || item.createdAt || 0;
+          const serverTs   = serverItem.updatedAt || serverItem.modifiedAt || serverItem.createdAt || 0;
+          return incomingTs >= serverTs ? item : serverItem;
+        });
+        const allItems = [...resolvedIncoming, ...preserved];
+        if (preserved.length > 0 || filteredSanitized.length < sanitized.length) {
+          // Déduplication finale par ID
           const seenIds = new Set();
-          finalValue = merged.filter(item => {
+          finalValue = allItems.filter(item => {
             const id = item?.id ? String(item.id) : null;
             if (!id) return true;
             if (seenIds.has(id)) return false;
@@ -2370,6 +2402,33 @@ app.post('/api/sync/resync-all', rateLimiter(5, 60_000), authenticateToken, asyn
   await auditLog(userId, 'SYNC_RESYNC_ALL', 'sync', `Resync forcé par ${userId}`, req.ip);
   console.log(`[SYNC] Resync forcé par ${userId} (${io.sockets.sockets.size} clients)`);
   res.json({ ok: true, clients: io.sockets.sockets.size, ts });
+});
+
+// COLLECT-ALL — Demande à tous les clients de pousser leurs données locales vers le serveur
+// Le serveur agrège via union-merge (tombstones respectés) puis rediffuse un resync_all
+app.post('/api/sync/collect-all', rateLimiter(3, 120_000), authenticateToken, async (req, res) => {
+  if (!req.user?.isAdmin && (req.user?.level || 0) < 6) {
+    return res.status(403).json({ error: 'Admin système requis' });
+  }
+  const userId = req.user?.id || 'admin';
+  const collectId = `collect-${Date.now()}`;
+  const clientCount = io.sockets.sockets.size;
+
+  // Réinitialiser les flags push_complete sur tous les clients
+  for (const [, info] of connectedClients) info.pushComplete = false;
+
+  // Broadcast : demander à tous les clients de pousser leurs données
+  io.emit('request_push_all', { collectId, requestedBy: userId });
+  await auditLog(userId, 'COLLECT_ALL', 'sync', `Collecte données tous postes (${clientCount} clients)`, req.ip);
+  console.log(`[COLLECT] Collecte lancée par ${userId} — collectId=${collectId}, clients=${clientCount}`);
+
+  // Attendre 25s que les clients poussent, puis broadcaster un resync_all
+  setTimeout(() => {
+    io.emit('resync_all', { by: userId, ts: Date.now(), reason: 'post_collect_resync' });
+    console.log(`[COLLECT] Resync post-collecte diffusé (collectId=${collectId})`);
+  }, 25000);
+
+  res.json({ ok: true, collectId, clients: clientCount, resyncIn: 25 });
 });
 
 // FIX SYNC-A3 — Vérification données IDB vs SQLite (admin)

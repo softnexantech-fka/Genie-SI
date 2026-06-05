@@ -665,6 +665,41 @@ async function initWebSocket() {
       window.location.reload();
     });
 
+    // COLLECT-PUSH — L'admin demande à tous les clients de pousser leurs données locales
+    // Le serveur fait ensuite un merge union (tombstones respectés) → données agrégées de tous les postes
+    _socket.on('request_push_all', async ({ collectId, keys: requestedKeys } = {}) => {
+      const AUTH_SKIP = new Set(['gc-users', 'users']);
+      const pushKeys = requestedKeys?.length ? requestedKeys : [...SHARED_KEYS].filter(k => !AUTH_SKIP.has(k));
+      const token = getJWTToken();
+      if (!token) return; // pas de token = pas authentifié, on ne pousse pas
+      const proxyUrl = getProxyUrl();
+      let pushed = 0;
+      for (const key of pushKeys) {
+        try {
+          const raw = _lsGet(key);
+          if (!raw) continue;
+          const val = JSON.parse(raw);
+          // Ne pousser que les tableaux non-vides ou objets non-vides
+          if (Array.isArray(val) && val.length === 0) continue;
+          if (val === null || val === undefined) continue;
+          await fetch(`${proxyUrl}/api/data/${encodeURIComponent(key)}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}`,
+              'X-Socket-Id': _socket?.id || '',
+            },
+            body: JSON.stringify({ value: val }),
+            signal: AbortSignal.timeout(8000),
+          }).catch(() => {});
+          pushed++;
+        } catch { /* silencieux */ }
+      }
+      // Signaler au serveur que ce client a fini de pousser
+      try { _socket.emit('push_complete', { collectId, pushed }); } catch {}
+      console.log(`[DS] collect-push terminé: ${pushed} clés poussées (collectId=${collectId})`);
+    });
+
     _socket.on('flush_result', ({ synced, total }) => {
       console.log(`[DS] ✅ Sync offline: ${synced}/${total} éléments`);
     });

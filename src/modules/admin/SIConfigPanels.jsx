@@ -678,6 +678,36 @@ export function SyncControlPanel({ T, currentUser }) {
     setLoading('');
   };
 
+  const handleCollectAll = async () => {
+    if (!await _dlg.confirm(
+      'Collecter les données de TOUS les postes connectés et les agréger sur le serveur ?\n\n' +
+      'Chaque poste va pousser ses données locales. Le serveur fera un merge union (les éléments supprimés intentionnellement resteront supprimés grâce aux tombstones). ' +
+      'Un resync global sera déclenché 25 secondes après.\n\n' +
+      'Opération recommandée pour récupérer des données manquantes.',
+      'Collecter & Agréger tous les postes', null, false
+    )) return;
+    setLoading('collect-all');
+    addLog('Collecte en cours — demande à tous les postes de pousser leurs données...', 'info');
+    try {
+      const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+      const r = await fetch(
+        `${status?.proxyUrl || 'http://localhost:3001'}/api/sync/collect-all`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          signal: AbortSignal.timeout(15000) }
+      );
+      if (r.ok) {
+        const data = await r.json();
+        addLog(`Collecte lancée : ${data.clients} poste(s) notifiés — resync dans ${data.resyncIn}s`, 'success');
+        playSound('success');
+        gcToast.success(`Collecte en cours sur ${data.clients} poste(s). Resync dans ${data.resyncIn}s…`);
+      } else {
+        const err = await r.json().catch(() => ({}));
+        addLog(`Erreur collecte : ${err.error || r.status}`, 'error');
+      }
+    } catch (e) { addLog(`Erreur : ${e.message}`, 'error'); }
+    setLoading('');
+  };
+
   const handlePushLocal = async () => {
     if (!await _dlg.confirm('Pousser TOUTES les données locales vers le serveur ? (les données serveur plus récentes seront préservées)', 'Push local → serveur', null, false)) return;
     setLoading('push');
@@ -900,6 +930,10 @@ export function SyncControlPanel({ T, currentUser }) {
         <button disabled={!!loading} onClick={handleResyncAll}
           style={{ background:'#6366F122', border:'1px solid #6366F144', color:'#6366F1', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
           {loading==='resync-all' ? '⏳ Envoi...' : 'Resync tous les postes'}
+        </button>
+        <button disabled={!!loading} onClick={handleCollectAll}
+          style={{ background:'#F59E0B22', border:'2px solid #F59E0B88', color:'#F59E0B', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='collect-all' ? '⏳ Collecte...' : '🔄 Collecter & Agréger tous les postes'}
         </button>
         <button disabled={!!loading} onClick={handlePushLocal}
           style={{ background:'#EC489922', border:'1px solid #EC489944', color:'#EC4899', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
