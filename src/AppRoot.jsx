@@ -552,7 +552,7 @@ export default function App() {
                 role:          u.role || 'Collaborateur',
                 level:         u.level ?? 1,
                 accountStatus: u.accountStatus || 'ACTIF',
-                passwordHash:  (u.passwordHash && !u.passwordHash.startsWith('$2') ? u.passwordHash : ''),
+                passwordHash:  u.passwordHash || '',
                 isAdmin:       u.isAdmin || false,
                 isMG:          u.isMG || false,
                 process:       u.process || '',
@@ -593,16 +593,22 @@ export default function App() {
                 const n = Array.isArray(serverVal) ? `${serverVal.length} entrées` : 'objet';
                 console.log(`[SI] ⬇️  Hydraté depuis serveur : ${key} (${n})`);
               } else {
-                // Local plus récent → pousser local vers serveur et garder local en UI
+                // Local plus récent → vérifier que local a au moins autant d'entrées que serveur
                 const localVal = lsLoad(key, fallback);
-                if (localVal !== null && localVal !== undefined) {
+                const localCount  = Array.isArray(localVal)  ? localVal.length  : 0;
+                const serverCount = Array.isArray(serverVal) ? serverVal.length : 0;
+                // Pour les clés critiques (users), le serveur gagne si le local a moins d'entrées
+                const AUTH_CRITICAL = new Set(['users', 'gc-users']);
+                const serverHasMore = AUTH_CRITICAL.has(key) && serverCount > localCount;
+                if (localVal !== null && localVal !== undefined && !serverHasMore) {
                   setters.forEach(fn => fn(localVal));
                   dsSave(key, localVal).catch(() => {});
                   console.log(`[SI] ⬆️  Local plus récent — push vers serveur : ${key}`);
                 } else {
-                  // Pas de local valide → utiliser serveur quand même
+                  // Pas de local valide OU serveur a plus d'entrées → utiliser serveur
                   lsSave(key, serverVal);
                   setters.forEach(fn => fn(serverVal));
+                  console.log(`[SI] ⬇️  Serveur gagne (${serverCount} > ${localCount}) : ${key}`);
                 }
               }
 
@@ -619,7 +625,7 @@ export default function App() {
                   role:          u.role || 'Collaborateur',
                   level:         u.level ?? 1,
                   accountStatus: u.accountStatus || 'ACTIF',
-                  passwordHash:  (u.passwordHash && !u.passwordHash.startsWith('$2') ? u.passwordHash : ''),
+                  passwordHash:  u.passwordHash || '',
                   isAdmin:       u.isAdmin || false,
                   isMG:          u.isMG || false,
                   process:       u.process || '',
@@ -805,7 +811,7 @@ export default function App() {
                   role:          u.role || 'Collaborateur',
                   level:         u.level ?? 1,
                   accountStatus: u.accountStatus || 'ACTIF',
-                  passwordHash:  (u.passwordHash && !u.passwordHash.startsWith('$2') ? u.passwordHash : ''),
+                  passwordHash:  u.passwordHash || '',
                   isAdmin:       u.isAdmin || false,
                   isMG:          u.isMG || false,
                   process:       u.process || '',
