@@ -2057,6 +2057,85 @@ app.post('/api/email', rateLimiter(3, 60_000), authenticateToken, async (req, re
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Sync Admin ───────────────────────────────────────────────────────────────
+// FIX SYNC-A1 — Statut synchronisation (admin)
+// Retourne le nombre de clés, de fichiers, de clients connectés, et les dernières mise à jour.
+app.get('/api/sync/status', rateLimiter(30), authenticateToken, async (req, res) => {
+  try {
+    const connectedClients = io.sockets.sockets.size;
+    let keyCount = 0, fileCount = 0, lastUpdate = null;
+    if (dbReady) {
+      const row = dbMode === 'sqlite3'
+        ? await getAsync('SELECT COUNT(*) as cnt FROM si_kv')
+        : db.prepare('SELECT COUNT(*) as cnt FROM si_kv').get();
+      keyCount = row?.cnt || 0;
+      const fRow = dbMode === 'sqlite3'
+        ? await getAsync('SELECT COUNT(*) as cnt FROM si_files WHERE deleted=0')
+        : db.prepare('SELECT COUNT(*) as cnt FROM si_files WHERE deleted=0').get();
+      fileCount = fRow?.cnt || 0;
+      const uRow = dbMode === 'sqlite3'
+        ? await getAsync('SELECT MAX(updated_at) as last FROM si_kv')
+        : db.prepare('SELECT MAX(updated_at) as last FROM si_kv').get();
+      lastUpdate = uRow?.last || null;
+    }
+    res.json({
+      ok: true,
+      connectedClients,
+      keyCount,
+      fileCount,
+      lastUpdate,
+      dbReady,
+      uptime: process.uptime(),
+      ts: Date.now(),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// FIX SYNC-A2 — Forcer resync sur tous les clients connectés (admin seulement)
+// Diffuse un événement 'resync_all' sur tous les sockets, chaque client vide son cache et re-fetch.
+app.post('/api/sync/resync-all', rateLimiter(5, 60_000), authenticateToken, async (req, res) => {
+  if (!req.user?.isAdmin && (req.user?.level || 0) < 4) {
+    return res.status(403).json({ error: 'Admin requis' });
+  }
+  const userId = req.user?.id || 'admin';
+  const ts = Date.now();
+  // Broadcast vers tous les clients connectés (y compris l'expéditeur)
+  io.emit('resync_all', { by: userId, ts, reason: req.body?.reason || 'admin_resync' });
+  await auditLog(userId, 'SYNC_RESYNC_ALL', 'sync', `Resync forcé par ${userId}`, req.ip);
+  console.log(`[SYNC] Resync forcé par ${userId} (${io.sockets.sockets.size} clients)`);
+  res.json({ ok: true, clients: io.sockets.sockets.size, ts });
+});
+
+// FIX SYNC-A3 — Vérification données IDB vs SQLite (admin)
+// Retourne les counts par clé pour comparaison client/serveur.
+app.get('/api/sync/key-counts', rateLimiter(10), authenticateToken, async (req, res) => {
+  if (!req.user?.isAdmin && (req.user?.level || 0) < 4) {
+    return res.status(403).json({ error: 'Admin requis' });
+  }
+  if (!dbReady) return res.status(503).json({ error: 'DB indisponible' });
+  try {
+    const rows = dbMode === 'sqlite3'
+      ? await allAsync('SELECT key, updated_at, updated_by FROM si_kv ORDER BY updated_at DESC LIMIT 200')
+      : db.prepare('SELECT key, updated_at, updated_by FROM si_kv ORDER BY updated_at DESC LIMIT 200').all();
+    const counts = {};
+    for (const row of rows) {
+      try {
+        const val = await dbGet(row.key);
+        counts[row.key] = {
+          count: Array.isArray(val) ? val.length : (val ? 1 : 0),
+          updatedAt: row.updated_at,
+          updatedBy: row.updated_by,
+        };
+      } catch {}
+    }
+    res.json({ ok: true, keys: counts });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Backup ───────────────────────────────────────────────────────────────────
 
 // TASK1 — SQLite daily backup via better-sqlite3 .backup() API

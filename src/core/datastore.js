@@ -582,8 +582,72 @@ async function initWebSocket() {
       } catch {}
     });
 
+    // FIX SYNC-F1 — file_uploaded : invalider cache des clés fichiers + notifier composants
     _socket.on('file_uploaded', (data) => {
-      _syncListeners.forEach(fn => { try { fn({ type: 'file_uploaded', ...data }); } catch {} });
+      // Invalider les clés liées aux fichiers pour forcer un re-fetch
+      const fileKeys = ['gc-dossier-files', 'gc-files', 'gc-docs-unified', 'gc-standalone-docs'];
+      if (data?.module) {
+        if (data.module === 'sirh')   fileKeys.push('gc-sirh-fichiers');
+        if (data.module === 'crm')    fileKeys.push('gc-crm-interactions');
+        if (data.module === 'docs')   fileKeys.push('gc-docs-unified');
+        if (data.module === 'logistique') fileKeys.push('gc-stocks');
+      }
+      fileKeys.forEach(k => {
+        _cache.delete(k);
+        _pendingFetches.delete(k);
+      });
+      // Notifier tous les listeners (composants React et hooks)
+      _syncListeners.forEach(fn => {
+        try { fn({ key: data?.dossierId ? 'gc-dossier-files' : 'gc-files', action: 'file_uploaded', type: 'file_uploaded', ...data }); } catch {}
+      });
+      // Dispatch StorageEvent pour les composants qui écoutent via useRemoteSync
+      try {
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: '__GC__gc-dossier-files',
+          newValue: JSON.stringify({ ts: Date.now(), action: 'file_uploaded' }),
+        }));
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: '__GC__gc-files',
+          newValue: JSON.stringify({ ts: Date.now(), action: 'file_uploaded' }),
+        }));
+      } catch {}
+    });
+
+    // FIX SYNC-F2 — file_deleted : nettoyer l'IDB local + notifier composants
+    _socket.on('file_deleted', ({ id, ts }) => {
+      if (!id) return;
+      // Supprimer de l'IDB local (import dynamique pour éviter dépendance circulaire)
+      try {
+        import('./filestore.js').then(({ gcFileDeleteLocal }) => {
+          if (gcFileDeleteLocal) gcFileDeleteLocal(id).catch(() => {});
+        }).catch(() => {});
+      } catch {}
+      // Invalider cache fichiers
+      ['gc-dossier-files', 'gc-files', 'gc-docs-unified', 'gc-standalone-docs'].forEach(k => {
+        _cache.delete(k);
+        _pendingFetches.delete(k);
+      });
+      _syncListeners.forEach(fn => {
+        try { fn({ key: 'gc-files', action: 'file_deleted', fileId: id, ts }); } catch {}
+      });
+      try {
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: '__GC__gc-dossier-files',
+          newValue: JSON.stringify({ ts: ts || Date.now(), action: 'file_deleted', fileId: id }),
+        }));
+      } catch {}
+    });
+
+    // FIX SYNC-A2 — Resync global déclenché par l'admin : vider le cache + notifier hooks
+    _socket.on('resync_all', ({ by, ts, reason }) => {
+      console.log(`[DS] Resync global demandé par ${by} (${reason})`);
+      _cache.clear();
+      _pendingFetches.clear();
+      _syncListeners.forEach(fn => {
+        try { fn({ key: '__all__', action: 'force_resync', ts, by }); } catch {}
+      });
+      // Dispatch custom event pour AppRoot si abonné
+      try { window.dispatchEvent(new CustomEvent('gc-resync-all', { detail: { by, ts, reason } })); } catch {}
     });
 
     _socket.on('full_restore', ({ filename, restored }) => {
@@ -657,6 +721,61 @@ export function dsOnSync(fn) {
   return () => _syncListeners.delete(fn);
 }
 
+// ── Resync forcé ─────────────────────────────────────────────────────────────
+// FIX SYNC-R1 — Resync complet : vide tout le cache + re-fetch toutes les clés actives.
+// Utilisé par le panneau admin ou après détection d'incohérence.
+export async function dsForceResyncAll() {
+  _cache.clear();
+  _pendingFetches.clear();
+  const online = await checkProxy();
+  if (!online) return { ok: false, reason: 'offline' };
+  // Flush la file offline d'abord
+  await flushOfflineQueue().catch(() => {});
+  // Notifier tous les hooks de rafraîchir
+  _syncListeners.forEach(fn => {
+    try { fn({ key: '__all__', action: 'force_resync', ts: Date.now() }); } catch {}
+  });
+  // Déclencher re-fetch des clés les plus critiques
+  const criticalKeys = [
+    'users', 'gc-users', 'dossiers', 'taches', 'rdvs',
+    'gc-dossier-files', 'gc-files', 'gc-docs-unified', 'gc-notifications',
+    'gc-messages-global', 'gc-presence',
+  ];
+  const results = await Promise.allSettled(
+    criticalKeys.map(k => dsGet(k, null).then(v => {
+      if (v !== null) {
+        _cache.set(k, { value: v, ts: Date.now() });
+        try {
+          window.dispatchEvent(new StorageEvent('storage', {
+            key: `__GC__${k}`,
+            newValue: JSON.stringify({ ts: Date.now(), action: 'force_resync' }),
+          }));
+        } catch {}
+      }
+      return { key: k, ok: true };
+    }))
+  );
+  const synced = results.filter(r => r.status === 'fulfilled').length;
+  console.log(`[DS] Force resync : ${synced}/${criticalKeys.length} clés rafraîchies`);
+  return { ok: true, synced, total: criticalKeys.length };
+}
+
+// ── Statut synchronisation ────────────────────────────────────────────────────
+// FIX SYNC-R2 — Expose l'état complet de la sync pour le panneau admin.
+export function dsGetSyncStatus() {
+  const queue = loadOfflineQueue();
+  return {
+    online:         _online,
+    socketReady:    _socketReady,
+    socketId:       _socket?.id || null,
+    cacheSize:      _cache.size,
+    offlineQueue:   queue.length,
+    proxyUrl:       PROXY_URL,
+    pendingFetches: _pendingFetches.size,
+    ts:             Date.now(),
+  };
+}
+
 // [D4] dsStartSync — l'ancien code ajoutait onUpdate sans le retirer.
 // Désormais on retourne un unsub propre ET on évite les doublons.
 export function dsStartSync(onUpdate) {
@@ -667,6 +786,16 @@ export function dsStartSync(onUpdate) {
   }
 
   startOfflineRetryLoop();
+
+  // FIX SYNC-P1 — Heartbeat resync toutes les 60s pour les clients passifs.
+  // Invalide le cache des clés critiques pour forcer un re-fetch discret en arrière-plan.
+  // Évite qu'un client reste "bloqué" sur des données périmées s'il a manqué des broadcasts.
+  let _heartbeatTick = 0;
+  const HEARTBEAT_KEYS = [
+    'users', 'gc-users', 'dossiers', 'taches', 'gc-dossier-files', 'gc-files',
+    'gc-notifications', 'gc-messages-global', 'gc-presence',
+  ];
+
   const interval = setInterval(async () => {
     const nowOnline = await checkProxy();
     if (nowOnline && !_socketReady) {
@@ -674,6 +803,22 @@ export function dsStartSync(onUpdate) {
     }
     if (nowOnline) {
       await flushOfflineQueue();
+      // FIX SYNC-P1 : Toutes les 60s (6 ticks × 10s), invalider les clés critiques
+      _heartbeatTick++;
+      if (_heartbeatTick % 6 === 0) {
+        HEARTBEAT_KEYS.forEach(k => {
+          const cached = _cache.get(k);
+          // N'invalider que si la donnée a plus de 45s (évite d'écraser un fetch récent)
+          if (!cached || Date.now() - cached.ts > 45_000) {
+            _cache.delete(k);
+            _pendingFetches.delete(k);
+          }
+        });
+        // Notifier les hooks pour qu'ils re-fetchent si abonnés
+        _syncListeners.forEach(fn => {
+          try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: Date.now() }); } catch {}
+        });
+      }
     }
     if (!nowOnline && _online) {
       _online = false;

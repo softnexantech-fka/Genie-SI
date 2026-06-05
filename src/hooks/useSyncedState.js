@@ -41,8 +41,16 @@ export function useSyncedState(key, fallback = null) {
 
     // Écoute des changements temps réel poussés par le serveur
     const unsub = dsOnSync((event) => {
-      if (event.key !== key) return;
       if (!mountedRef.current) return;
+      // FIX SYNC-R1 : force_resync ou heartbeat → re-fetch inconditionnellement
+      if (event.action === 'force_resync' || event.action === 'heartbeat') {
+        dsGet(key, fallback).then(val => {
+          if (!mountedRef.current) return;
+          if (val !== null && val !== undefined) { lsSave(key, val); setData(val); }
+        }).catch(() => {});
+        return;
+      }
+      if (event.key !== key) return;
       // Ne pas écraser si notre écriture locale est plus récente que ce broadcast
       try {
         const localWriteTs = parseInt(_lsGet('__ts__:' + key) || '0');

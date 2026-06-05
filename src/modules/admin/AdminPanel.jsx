@@ -10,7 +10,7 @@ import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, Nati
 import { AIConfigAdminTab } from '../../components/AIAssistant.jsx';
 import { ActivityJournal, FileDataManager, PrinterConfig } from './InformationsPanel.jsx';
 import { AdminConnexionsTab } from './GestionComptesPanel.jsx';
-import { ExportBackupPanel } from './SIConfigPanels.jsx';
+import { ExportBackupPanel, SyncControlPanel } from './SIConfigPanels.jsx';
 import { ProcessAppMatrixAdmin } from './HubPanels.jsx';
 import { AdminCodeEditor } from './GestionComptesPanel.jsx';
 
@@ -627,6 +627,7 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
           ...(isAdmin ? [{ id: "securite", icon: "🛡️", label: `Alertes Séc. (${(securityAlertsProp||[]).length})` }] : []),
           ...(isAdmin ? [{ id: "export_backup", icon: "💾", label: "Export/Import" }] : []),
           ...(!isAdmin && isMG ? [{ id: "export_backup", icon: "💾", label: "Export/Import" }] : []),
+          ...(isAdmin ? [{ id: "sync_control", icon: "🔄", label: "Sync & Intégrité" }] : []),
         ]} active={adminTab} onChange={setAdminTab} T={T} />
 
         {/* ── GESTION COMPTES ── */}
@@ -1314,6 +1315,10 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
           <DelaisAdminPanel T={T} localUser={localUser} setNotifications={setNotifications} />
         )}
 
+        {/* ── SYNC & INTÉGRITÉ DES DONNÉES ── */}
+        {adminTab === "sync_control" && (
+          <SyncControlPanel T={T} currentUser={localUser} />
+        )}
 
         {/* ── SAUVEGARDE / RESTAURATION GRANULAIRE (v143) ── */}
         {adminTab === "export_backup" && (() => {

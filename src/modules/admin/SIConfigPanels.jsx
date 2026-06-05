@@ -26,6 +26,8 @@ import {
   playSound, gcGetDelaiConfig, gcLoadFiscalConfig,
   dsSave, gcSyncAuthUsers,
 } from '../../core/index.js';
+import { dsForceResyncAll, dsGetSyncStatus, SHARED_KEYS } from '../../core/datastore.js';
+import { gcSyncFilesToServer, gcFileStats } from '../../core/filestore.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { GC_FISCAL_CONFIG_DEFAULT } from '../../core/constants.js';
@@ -536,6 +538,314 @@ export function ExportBackupPanel({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPOSANT : Panneau Sync & Intégrité des données (Admin)
+// Permet de vérifier la cohérence des données, forcer un resync global,
+// pousser les données locales vers le serveur, et synchroniser les fichiers IDB.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function SyncControlPanel({ T, currentUser }) {
+  const [status,      setStatus]      = React.useState(null);
+  const [serverInfo,  setServerInfo]  = React.useState(null);
+  const [keyCounts,   setKeyCounts]   = React.useState(null);
+  const [fileStats,   setFileStats]   = React.useState(null);
+  const [loading,     setLoading]     = React.useState('');
+  const [log,         setLog]         = React.useState([]);
+  const _dlg = useDialog();
+
+  const addLog = (msg, type = 'info') =>
+    setLog(p => [{ id: Date.now(), msg, type, at: new Date().toLocaleTimeString('fr-FR') }, ...p].slice(0, 40));
+
+  // Rafraîchir le statut local toutes les 3s
+  React.useEffect(() => {
+    const refresh = () => setStatus(dsGetSyncStatus());
+    refresh();
+    const iv = setInterval(refresh, 3000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Charger les stats fichiers IDB au montage
+  React.useEffect(() => {
+    gcFileStats().then(s => setFileStats(s)).catch(() => {});
+  }, []);
+
+  const fetchServerInfo = async () => {
+    setLoading('server');
+    try {
+      const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+      const r = await fetch(
+        `${status?.proxyUrl || 'http://localhost:3001'}/api/sync/status`,
+        { headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(8000) }
+      );
+      if (r.ok) { setServerInfo(await r.json()); addLog('Statut serveur récupéré', 'success'); }
+      else addLog('Erreur récupération statut serveur', 'error');
+    } catch (e) { addLog(`Erreur réseau : ${e.message}`, 'error'); }
+    setLoading('');
+  };
+
+  const fetchKeyCounts = async () => {
+    setLoading('keys');
+    try {
+      const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+      const r = await fetch(
+        `${status?.proxyUrl || 'http://localhost:3001'}/api/sync/key-counts`,
+        { headers: { Authorization: `Bearer ${tok}` }, signal: AbortSignal.timeout(15000) }
+      );
+      if (r.ok) {
+        const data = await r.json();
+        setKeyCounts(data.keys || {});
+        addLog(`${Object.keys(data.keys||{}).length} clés inspectées`, 'success');
+      } else addLog('Erreur récupération key-counts', 'error');
+    } catch (e) { addLog(`Erreur : ${e.message}`, 'error'); }
+    setLoading('');
+  };
+
+  const handleForceResync = async () => {
+    setLoading('resync');
+    addLog('Resync local en cours...', 'info');
+    try {
+      const result = await dsForceResyncAll();
+      if (result.ok) {
+        addLog(`Resync OK : ${result.synced}/${result.total} clés rafraîchies`, 'success');
+        playSound('success');
+        gcToast.success('Resync terminé — données à jour');
+      } else {
+        addLog(`Resync impossible : ${result.reason}`, 'error');
+      }
+    } catch (e) { addLog(`Erreur resync : ${e.message}`, 'error'); }
+    setLoading('');
+    setStatus(dsGetSyncStatus());
+  };
+
+  const handleResyncAll = async () => {
+    if (!await _dlg.confirm('Envoyer un resync global à TOUS les postes connectés ?', 'Resync global', null, false)) return;
+    setLoading('resync-all');
+    try {
+      const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+      const r = await fetch(
+        `${status?.proxyUrl || 'http://localhost:3001'}/api/sync/resync-all`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ reason: 'admin_manual' }), signal: AbortSignal.timeout(10000) }
+      );
+      if (r.ok) {
+        const data = await r.json();
+        addLog(`Resync global envoyé à ${data.clients} client(s)`, 'success');
+        playSound('success');
+        gcToast.success(`Resync global → ${data.clients} poste(s) notifiés`);
+      } else addLog('Erreur resync global', 'error');
+    } catch (e) { addLog(`Erreur : ${e.message}`, 'error'); }
+    setLoading('');
+  };
+
+  const handlePushLocal = async () => {
+    if (!await _dlg.confirm('Pousser TOUTES les données locales vers le serveur ? (les données serveur plus récentes seront préservées)', 'Push local → serveur', null, false)) return;
+    setLoading('push');
+    addLog('Push données locales...', 'info');
+    let pushed = 0, skipped = 0;
+    const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+    const proxyUrl = status?.proxyUrl || 'http://localhost:3001';
+    for (const key of SHARED_KEYS) {
+      try {
+        const raw = _lsGet(key);
+        if (!raw) { skipped++; continue; }
+        const val = JSON.parse(raw);
+        const r = await fetch(`${proxyUrl}/api/data/${encodeURIComponent(key)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ value: val, userId: currentUser?.id }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (r.ok) pushed++; else skipped++;
+      } catch { skipped++; }
+    }
+    addLog(`Push terminé : ${pushed} clés envoyées, ${skipped} ignorées`, pushed > 0 ? 'success' : 'warn');
+    playSound('success');
+    setLoading('');
+  };
+
+  const handleSyncIdbFiles = async () => {
+    setLoading('idb');
+    addLog('Synchronisation fichiers IDB → serveur...', 'info');
+    try {
+      const result = await gcSyncFilesToServer();
+      if (result.offline) { addLog('Hors ligne — impossible de sync les fichiers', 'error'); }
+      else { addLog(`Fichiers IDB syncés : ${result.synced}/${result.total||0}`, 'success'); }
+    } catch (e) { addLog(`Erreur sync IDB : ${e.message}`, 'error'); }
+    gcFileStats().then(s => setFileStats(s)).catch(() => {});
+    setLoading('');
+  };
+
+  const handleClearTombstones = async () => {
+    if (!await _dlg.confirm('Réinitialiser les tombstones ? Les éléments supprimés pourraient réapparaître si un autre poste les a encore en cache. Réservé aux corrections d\'urgence.', 'Réinitialiser tombstones', null, true)) return;
+    _lsSet('gc-tombstones', JSON.stringify({}));
+    await dsSave('gc-tombstones', {}).catch(() => {});
+    addLog('Tombstones réinitialisés', 'warn');
+    gcToast.warning('Tombstones effacés — vérifiez les données après resync');
+  };
+
+  const StatusDot = ({ ok }) => (
+    <span style={{ display:'inline-block', width:10, height:10, borderRadius:'50%',
+      background: ok ? '#22C55E' : '#EF4444',
+      boxShadow: ok ? '0 0 6px #22C55E88' : '0 0 6px #EF444488',
+      marginRight:6, flexShrink:0 }}/>
+  );
+
+  const logColors = { success:'#22C55E', error:'#EF4444', warn:'#F59E0B', info: T.textMuted };
+
+  return (
+    <div style={{ padding:4 }}>
+      <div style={{ color:T.text, fontWeight:800, fontSize:14, marginBottom:4, display:'flex', alignItems:'center', gap:8 }}>
+        <StatusDot ok={status?.online && status?.socketReady}/>
+        Synchronisation & Intégrité des données
+      </div>
+      <div style={{ color:T.textMuted, fontSize:11, marginBottom:16 }}>
+        Vérification, resync forcé, push local, sync fichiers hors ligne. Réservé à l'administration.
+      </div>
+
+      {/* Statut local */}
+      <div style={{ background:T.surface2, border:`1px solid ${T.border}`, borderRadius:12, padding:14, marginBottom:12 }}>
+        <div style={{ color:T.text, fontWeight:700, fontSize:12, marginBottom:10 }}>Statut ce poste</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:8 }}>
+          {[
+            { label:'Réseau', val: status?.online ? 'En ligne' : 'Hors ligne', ok: status?.online },
+            { label:'WebSocket', val: status?.socketReady ? 'Connecté' : 'Déconnecté', ok: status?.socketReady },
+            { label:'File hors ligne', val: `${status?.offlineQueue || 0} éléments`, ok: (status?.offlineQueue || 0) === 0 },
+            { label:'Cache mémoire', val: `${status?.cacheSize || 0} clés`, ok: true },
+          ].map(({ label, val, ok }) => (
+            <div key={label} style={{ background:T.surface3, borderRadius:8, padding:'8px 10px', display:'flex', alignItems:'center', gap:6 }}>
+              <StatusDot ok={ok}/>
+              <div>
+                <div style={{ color:T.textMuted, fontSize:10 }}>{label}</div>
+                <div style={{ color:T.text, fontWeight:700, fontSize:11 }}>{val}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Statut serveur */}
+      {serverInfo && (
+        <div style={{ background:T.surface2, border:'1px solid #3B82F633', borderRadius:12, padding:14, marginBottom:12 }}>
+          <div style={{ color:'#3B82F6', fontWeight:700, fontSize:12, marginBottom:10 }}>Statut serveur</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+            {[
+              { label:'Clients connectés', val: serverInfo.connectedClients },
+              { label:'Clés SQLite', val: serverInfo.keyCount },
+              { label:'Fichiers serveur', val: serverInfo.fileCount },
+            ].map(({ label, val }) => (
+              <div key={label} style={{ background:T.surface3, borderRadius:8, padding:'8px 10px', textAlign:'center' }}>
+                <div style={{ color:'#3B82F6', fontWeight:800, fontSize:16 }}>{val}</div>
+                <div style={{ color:T.textMuted, fontSize:10 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+          {serverInfo.lastUpdate && (
+            <div style={{ color:T.textMuted, fontSize:10, marginTop:8 }}>
+              Dernière écriture serveur : {new Date(serverInfo.lastUpdate).toLocaleString('fr-FR')}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Fichiers IDB */}
+      {fileStats && (
+        <div style={{ background:T.surface2, border:'1px solid #8B5CF633', borderRadius:12, padding:14, marginBottom:12 }}>
+          <div style={{ color:'#8B5CF6', fontWeight:700, fontSize:12, marginBottom:8 }}>Fichiers cache local (IDB)</div>
+          <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
+            <span style={{ color:T.textMuted, fontSize:11 }}>
+              <strong style={{ color:T.text }}>{fileStats.idb?.count || 0}</strong> fichiers IDB
+              · {fileStats.idb?.totalSizeMB || 0} Mo · LS {fileStats.localStorage?.usedMB || 0} Mo
+            </span>
+            {(fileStats.localStorage?.percentUsed || 0) > 70 && (
+              <span style={{ color:'#EF4444', fontWeight:600, fontSize:11 }}>
+                Stockage local proche de la limite ({fileStats.localStorage.percentUsed}%)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Comparaison clés serveur/local */}
+      {keyCounts && (
+        <div style={{ background:T.surface2, border:'1px solid #F59E0B33', borderRadius:12, padding:14, marginBottom:12, maxHeight:240, overflowY:'auto' }}>
+          <div style={{ color:'#F59E0B', fontWeight:700, fontSize:12, marginBottom:8 }}>Inventaire clés serveur</div>
+          {Object.entries(keyCounts).slice(0,50).map(([k, info]) => {
+            const localRaw = _lsGet(k);
+            let localCount = 0;
+            try { const lv = JSON.parse(localRaw); localCount = Array.isArray(lv) ? lv.length : (lv ? 1 : 0); } catch {}
+            const diff = info.count - localCount;
+            const hasDiff = Math.abs(diff) > 0;
+            return (
+              <div key={k} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'3px 6px', borderRadius:4, marginBottom:2,
+                background: hasDiff ? '#F59E0B10' : 'transparent' }}>
+                <span style={{ color:T.text, fontSize:10, fontFamily:'monospace' }}>{k}</span>
+                <span style={{ fontSize:10, color: hasDiff ? '#F59E0B' : T.textMuted, fontWeight: hasDiff ? 700 : 400 }}>
+                  local:{localCount} / srv:{info.count}
+                  {hasDiff ? ` (Δ${diff > 0 ? '+' : ''}${diff})` : ''}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+        <button disabled={!!loading} onClick={fetchServerInfo}
+          style={{ background:'#3B82F622', border:'1px solid #3B82F644', color:'#3B82F6', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='server' ? '⏳ Chargement...' : 'Vérifier statut serveur'}
+        </button>
+        <button disabled={!!loading} onClick={fetchKeyCounts}
+          style={{ background:'#F59E0B22', border:'1px solid #F59E0B44', color:'#F59E0B', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='keys' ? '⏳ Analyse...' : 'Comparer clés (local vs serveur)'}
+        </button>
+        <button disabled={!!loading} onClick={handleForceResync}
+          style={{ background:'#22C55E22', border:'1px solid #22C55E44', color:'#22C55E', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='resync' ? '⏳ Resync...' : 'Resync ce poste'}
+        </button>
+        <button disabled={!!loading} onClick={handleResyncAll}
+          style={{ background:'#6366F122', border:'1px solid #6366F144', color:'#6366F1', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='resync-all' ? '⏳ Envoi...' : 'Resync tous les postes'}
+        </button>
+        <button disabled={!!loading} onClick={handlePushLocal}
+          style={{ background:'#EC489922', border:'1px solid #EC489944', color:'#EC4899', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='push' ? '⏳ Push...' : 'Pousser données locales → serveur'}
+        </button>
+        <button disabled={!!loading} onClick={handleSyncIdbFiles}
+          style={{ background:'#8B5CF622', border:'1px solid #8B5CF644', color:'#8B5CF6', borderRadius:8, padding:'9px 12px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          {loading==='idb' ? '⏳ Sync...' : 'Sync fichiers hors ligne (IDB)'}
+        </button>
+      </div>
+
+      {/* Réinitialisation tombstones — zone danger */}
+      <div style={{ background:'#EF444408', border:'1px solid #EF444430', borderRadius:10, padding:12, marginBottom:12 }}>
+        <div style={{ color:'#EF4444', fontWeight:700, fontSize:11, marginBottom:6 }}>Zone correction d'urgence</div>
+        <button disabled={!!loading} onClick={handleClearTombstones}
+          style={{ background:'#EF444415', border:'1px solid #EF444440', color:'#EF4444', borderRadius:8, padding:'7px 14px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+          Réinitialiser les tombstones (récupération éléments supprimés)
+        </button>
+        <div style={{ color:T.textMuted, fontSize:10, marginTop:6 }}>
+          Attention : efface la liste des suppressions intentionnelles. À utiliser uniquement pour récupérer des données supprimées par erreur.
+        </div>
+      </div>
+
+      {/* Journal des opérations */}
+      {log.length > 0 && (
+        <div style={{ background:T.surface2, border:`1px solid ${T.border}`, borderRadius:10, padding:12 }}>
+          <div style={{ color:T.text, fontWeight:700, fontSize:11, marginBottom:8 }}>Journal</div>
+          {log.map(entry => (
+            <div key={entry.id} style={{ display:'flex', gap:8, alignItems:'flex-start', marginBottom:4 }}>
+              <span style={{ color:T.textMuted, fontSize:10, minWidth:50 }}>{entry.at}</span>
+              <span style={{ color:logColors[entry.type]||T.text, fontSize:11 }}>{entry.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -407,6 +407,17 @@ export async function gcFileDelete(fileRef) {
 }
 
 /**
+ * FIX SYNC-F2 — Supprimer uniquement du cache IDB local (sans appel serveur).
+ * Utilisé quand le serveur broadcast 'file_deleted' : un autre client a déjà fait la suppression,
+ * on nettoie juste notre cache local pour cohérence.
+ */
+export async function gcFileDeleteLocal(fileId) {
+  if (!fileId) return false;
+  try { await idbDelete(fileId); } catch {}
+  return true;
+}
+
+/**
  * Lister les fichiers d'un dossier
  */
 export async function gcFileListByDossier(dossierId) {
