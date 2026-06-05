@@ -1312,6 +1312,29 @@ export function SIApp(props) {
   }, [localUser, performBackup]);
 
   const [dossierFiles, setDossierFiles] = useState(() => lsLoad("gc-dossier-files", []));
+
+  // Re-fetch depuis le serveur à chaque changement d'utilisateur et au montage.
+  // dossierFiles est un plain useState — il n'a pas le mécanisme useSyncedState.
+  // Sans ce fetch, chaque compte voit le localStorage de la session précédente.
+  useEffect(() => {
+    if (!currentUser?.id || isDemoMode) return;
+    import('./core/datastore.js').then(({ dsGet }) => {
+      dsGet('gc-dossier-files', null).then(val => {
+        if (Array.isArray(val)) {
+          lsSave('gc-dossier-files', val);
+          setDossierFiles(val);
+        }
+      }).catch(() => {});
+      dsGet('gc-standalone-docs', null).then(val => {
+        if (Array.isArray(val)) {
+          lsSave('gc-standalone-docs', val);
+          setStandaloneDocumentsRaw(val);
+          setDocsRaw(val);
+        }
+      }).catch(() => {});
+    }).catch(() => {});
+  }, [currentUser?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const saveDossierFiles = useCallback((v) => {
     setDossierFiles(prev => {
       const resolved = typeof v === "function" ? v(prev) : v;

@@ -190,21 +190,13 @@ export default function App() {
     } else {
       try { _lsRm("gc-active-session"); } catch (_) {}
     }
-    // Re-fetch immédiat des clés fichiers depuis le serveur à chaque changement de compte.
-    // Garantit que les données serveur (version la plus récente) écrasent le cache stale
-    // du localStorage, quel que soit l'utilisateur précédemment connecté.
+    // Après le rendu de l'app (hooks useSyncedState montés), déclencher un re-fetch
+    // général via gc-sync-online — signal que tous les hooks useSyncedState écoutent.
+    // Délai 600ms pour laisser le temps à React de rendre les modules et monter les hooks.
     if (safeUser) {
-      const FILE_KEYS_REFRESH = ['gc-dossier-files','gc-files','gc-docs-unified','gc-standalone-docs','gc-sirh-fichiers'];
-      FILE_KEYS_REFRESH.forEach(k => {
-        dsGet(k, null).then(v => {
-          if (v !== null) {
-            lsSave(k, v);
-            try {
-              window.dispatchEvent(new StorageEvent('storage', { key: `__GC__${k}`, newValue: JSON.stringify({ ts: Date.now(), action: 'login_refresh' }) }));
-            } catch (_) {}
-          }
-        }).catch(() => {});
-      });
+      setTimeout(() => {
+        try { window.dispatchEvent(new CustomEvent('gc-sync-online')); } catch (_) {}
+      }, 600);
     }
   }, []); // FIX v135 — fin useCallback
   const [isDemoMode, setIsDemoMode] = useState(false);
