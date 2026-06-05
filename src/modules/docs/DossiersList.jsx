@@ -3,6 +3,7 @@ import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // DossiersList.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, _tActive, gcPushNotif, playSound, formatDate, gcGetDelaiConfig, gcAntiRedondance, generateAccessCode, _dataUrlToBlob, useSI, gcFileSave, _activeUser, formatDateTime, getProcColor, getUser, gcCalcDueDate, gcDownloadDoc, gcDocIcon, gcDelaiStatut, gcReadFile, daysLeft, dsSave, dsMarkDeleted, dsDeleteItemFromArray, getProxyUrl, getJWTToken } from '../../core/index.js';
+import { gcDossierZipUrl } from '../../core/filestore.js';
 import { STATUS_CONFIG, PRIORITY_CONFIG, GC_CIRCUITS_INIT, GC_DOCS_REQUIS, GC_ACTIVITES, CODES, gcViewDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, Badge, ProgressBar} from '../../components/UI.jsx';
 import { TransferModal } from './ArchivagePanel.jsx';
@@ -1085,6 +1086,25 @@ export const DossiersList = React.memo(function DossiersList() {
               }}}
                 style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>▶ En cours</button>
             )}
+            {/* ⬇️ ZIP — exporter les dossiers sélectionnés */}
+            {selectedDossiers.length === 1 && (()=>{
+              const d = dossiers.find(x=>x.id===selectedDossiers[0]);
+              if (!d) return null;
+              const zipUrl = gcDossierZipUrl(d.id);
+              const token = getJWTToken?.() || null;
+              return (
+                <button onClick={async e=>{e.stopPropagation();
+                  const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
+                  const resp = await fetch(zipUrl, { headers }).catch(()=>null);
+                  if (!resp?.ok) { gcToast.error('Export ZIP indisponible'); return; }
+                  const blob = await resp.blob();
+                  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                  a.download = `${d.ref.replace(/\//g,'_')}.zip`; a.click();
+                }} style={{background:"#06B6D422",border:"1px solid #06B6D444",color:"#06B6D4",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>
+                  ⬇️ ZIP
+                </button>
+              );
+            })()}
             <button onClick={()=>setSelectedDossiers([])} style={{background:"transparent",border:"none",color:T.textMuted,cursor:"pointer",fontSize:10,marginLeft:"auto"}}>✕ Désélectionner</button>
           </div>
         )}
@@ -1204,6 +1224,21 @@ export const DossiersList = React.memo(function DossiersList() {
                 {/* 📤 Transférer — règle canTransferDossier */}
                 {!isReadOnly&&canTransferDossier(d)&&(
                   <button onClick={async e=>{e.stopPropagation();setShowTransferModal(d);}} title="Transférer le dossier" style={{background:"#6366F122",border:"1px solid #6366F144",borderRadius:6,padding:"4px 7px",color:"#6366F1",cursor:"pointer",fontSize:11}}>📤</button>
+                )}
+                {/* ⬇️ Exporter ZIP — accessible aux collaborateurs impliqués ou admin */}
+                {canManipulateDossier(d)&&(
+                  <button onClick={async e=>{
+                    e.stopPropagation();
+                    const zipUrl = gcDossierZipUrl(d.id);
+                    const token = getJWTToken?.() || null;
+                    const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
+                    const resp = await fetch(zipUrl, { headers }).catch(()=>null);
+                    if (!resp?.ok) { gcToast.error('Export ZIP indisponible. Vérifiez la connexion au serveur.'); return; }
+                    const blob = await resp.blob();
+                    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+                    a.download = `${d.ref.replace(/\//g,'_')}.zip`; a.click();
+                    URL.revokeObjectURL(a.href);
+                  }} title={`Télécharger le dossier ${d.ref} en ZIP`} style={{background:"#06B6D422",border:"1px solid #06B6D444",borderRadius:6,padding:"4px 7px",color:"#06B6D4",cursor:"pointer",fontSize:11}}>⬇️</button>
                 )}
                 {/* 🗄️ Archiver — dossier TERMINE + droits */}
                 {canArchiveDossier(d)&&d.status==="TERMINE"&&(

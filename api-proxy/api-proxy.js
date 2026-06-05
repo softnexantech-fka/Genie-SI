@@ -318,10 +318,9 @@ async function linkFileToDossierFolder(dossierId, dossierName, fileId, originalN
     // Utiliser un lien dur (hard link) pour éviter la duplication d'espace disque
     const safeName = sanitizeFolderName(path.parse(originalName).name) + path.extname(originalName).toLowerCase();
     const destPath = path.join(filesPath, `${fileId}_${safeName}`);
-    try {
-      fs.linkSync(diskPath, destPath); // Hard link — 0 octet supplémentaire
-    } catch {
-      fs.copyFileSync(diskPath, destPath); // Fallback copie si cross-device
+    // Copie directe (hard links échouent cross-filesystem et sous Windows)
+    if (!fs.existsSync(destPath)) {
+      fs.copyFileSync(diskPath, destPath);
     }
   } catch (e) {
     console.warn(`[DOSSIER-FS] Erreur liaison fichier:`, e.message);

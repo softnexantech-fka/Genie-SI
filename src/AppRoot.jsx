@@ -190,6 +190,22 @@ export default function App() {
     } else {
       try { _lsRm("gc-active-session"); } catch (_) {}
     }
+    // Re-fetch immédiat des clés fichiers depuis le serveur à chaque changement de compte.
+    // Garantit que les données serveur (version la plus récente) écrasent le cache stale
+    // du localStorage, quel que soit l'utilisateur précédemment connecté.
+    if (safeUser) {
+      const FILE_KEYS_REFRESH = ['gc-dossier-files','gc-files','gc-docs-unified','gc-standalone-docs','gc-sirh-fichiers'];
+      FILE_KEYS_REFRESH.forEach(k => {
+        dsGet(k, null).then(v => {
+          if (v !== null) {
+            lsSave(k, v);
+            try {
+              window.dispatchEvent(new StorageEvent('storage', { key: `__GC__${k}`, newValue: JSON.stringify({ ts: Date.now(), action: 'login_refresh' }) }));
+            } catch (_) {}
+          }
+        }).catch(() => {});
+      });
+    }
   }, []); // FIX v135 — fin useCallback
   const [isDemoMode, setIsDemoMode] = useState(false);
 

@@ -243,13 +243,34 @@ export function Dashboard() {
             <button onClick={toggleAdminIncognito} style={{background:"#A855F722",border:"1px solid #A855F744",color:"#A855F7",borderRadius:7,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>Désactiver</button>
           </div>
         )}
-        <div style={{ background: "#C41E3A22", border: "1px solid #C41E3A44", borderRadius: 8, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 18 }}>⚙️</span>
-          <div>
-            <div style={{ color: "#C41E3A", fontWeight: 800, fontSize: 12 }}>MODE ADMINISTRATEUR SYSTÈME</div>
-            <div style={{ color: T.textMuted, fontSize: 11 }}>Accès complet à la configuration du SI, gestion des utilisateurs et paramétrage global.</div>
+        <div style={{ background: "#C41E3A22", border: "1px solid #C41E3A44", borderRadius: 8, padding: "10px 14px", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 18 }}>⚙️</span>
+            <div>
+              <div style={{ color: "#C41E3A", fontWeight: 800, fontSize: 12 }}>MODE ADMINISTRATEUR SYSTÈME</div>
+              <div style={{ color: T.textMuted, fontSize: 11 }}>Accès complet à la configuration du SI, gestion des utilisateurs et paramétrage global.</div>
+            </div>
           </div>
-          <Btn variant="outline" size="sm" onClick={() => setActiveModule("admin")} style={{ marginLeft: "auto" }}>⚙️ Paramètres SI</Btn>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { icon: "⚙️", label: "Paramètres SI",      mod: "admin", tab: "settings" },
+              { icon: "🔄", label: "Sync & Intégrité",   mod: "admin", tab: "sync_control" },
+              { icon: "🔐", label: "Gestion accès",       mod: "admin", tab: "connexions" },
+              { icon: "🗂️", label: "Matrice programmes", mod: "admin", tab: "matrix" },
+              { icon: "💾", label: "Export / Import",     mod: "admin", tab: "export_backup" },
+              { icon: "📋", label: "Journaux & Logs",     mod: "admin", tab: "logs" },
+            ].map(a => (
+              <button key={a.label}
+                onClick={() => {
+                  try { sessionStorage.setItem('gc-admin-tab', a.tab); } catch (_) {}
+                  setActiveModule(a.mod);
+                  playSound("notif");
+                }}
+                style={{ background: "#C41E3A18", border: "1px solid #C41E3A44", borderRadius: 7, padding: "5px 11px", color: "#C41E3A", cursor: "pointer", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                <span>{a.icon}</span><span>{a.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }} className="gc-stagger">
           {[
