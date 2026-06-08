@@ -1571,12 +1571,12 @@ export function SIApp(props) {
       { id:"taches",        icon:"📋", label:"Tâches & Alertes",           minLevel:1,
         rawCount: tacheGreen + tacheRed,
         countGreen: tacheGreen, countRed: tacheRed },
-      // Rapport d'activité entre Tâches et Demandes — niv2+
+      { id:"agenda",        icon:"📅", label:"Agenda & RDV",               minLevel:1 },
+      // Rapport d'activité après Agenda — niv2+
       ...((lvl >= 2) ? [{ id:"rapport_activite", icon:"📄", label:"Rapport d'Activité", minLevel:2 }] : []),
       { id:"demandes",      icon:"📨", label:"Mes Demandes",               minLevel:1,
         rawCount: demGreen + demRed,
         countGreen: demGreen, countRed: demRed },
-      { id:"agenda",        icon:"📅", label:"Agenda & RDV",               minLevel:1 },
       { id:"codification",  icon:"🏷️", label:"Codification & Refs",        minLevel:1 },
       { id:"archivage",     icon:"🗂️", label:"Archivage",                  minLevel:1 },
       { id:"processus",     icon:"🗺️", label:"Processus & Hiérarchie",     minLevel:1 },

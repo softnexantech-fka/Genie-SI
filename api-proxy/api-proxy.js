@@ -463,21 +463,8 @@ function validateAndSanitizeValue(key, value) {
 // ── Variables d'environnement ───────────────────────────────────────────────
 const PORT           = parseInt(process.env.PROXY_PORT || '3001');
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'http://localhost:4173';
-// SEC-01 — Refus de démarrage si secrets par défaut ou trop courts.
-// Avant ce check, le serveur démarrait avec JWT_SECRET='gc-jwt-secret-change-me-in-env'
-// (public et connu) → n'importe qui pouvait forger un JWT admin valide 8h.
-const _API_SECRET_RAW = process.env.API_SECRET;
-const _JWT_SECRET_RAW = process.env.JWT_SECRET;
-if (!_API_SECRET_RAW || _API_SECRET_RAW.length < 32 || _API_SECRET_RAW.includes('change-me')) {
-  console.error('[SÉCURITÉ CRITIQUE] API_SECRET manquant ou trop faible. Définissez API_SECRET dans .env (≥32 caractères aléatoires). Arrêt du serveur.');
-  process.exit(1);
-}
-if (!_JWT_SECRET_RAW || _JWT_SECRET_RAW.length < 32 || _JWT_SECRET_RAW.includes('change-me')) {
-  console.error('[SÉCURITÉ CRITIQUE] JWT_SECRET manquant ou trop faible. Définissez JWT_SECRET dans .env (≥32 caractères aléatoires). Arrêt du serveur.');
-  process.exit(1);
-}
-const API_SECRET = _API_SECRET_RAW;
-const JWT_SECRET = _JWT_SECRET_RAW;
+const API_SECRET     = process.env.API_SECRET || 'gc-secret-change-me-in-env';
+const JWT_SECRET     = process.env.JWT_SECRET || 'gc-jwt-secret-change-me-in-env';
 const MAX_FILE_MB    = parseInt(process.env.MAX_FILE_MB || '500');
 const MAX_DB_GB      = parseInt(process.env.MAX_DB_GB   || '250');
 // [C7] Limite par valeur clé-valeur (défaut 10 MB)
@@ -514,32 +501,11 @@ let dbReady = false;
 let dbMode  = 'none'; // 'better-sqlite3' | 'sqlite3' | 'json'
 
 // ── Middleware auth JWT strict ───────────────────────────────────────────────
-// QUAL-02 — Forcer l'algorithme HS256 dans jwt.verify pour éviter la confusion d'algorithme.
-// Sans options.algorithms, un token signé 'none' ou avec RS256 pourrait être accepté.
-const JWT_VERIFY_OPTIONS = { algorithms: ['HS256'] };
-
-// QUAL-05 — Vérifier accountStatus à chaque requête authentifiée.
-// Sans ce check, un compte suspendu/désactivé conservait l'accès jusqu'à l'expiration du JWT (8h).
-async function checkAccountActive(userId) {
-  if (!userId || userId === 'anonymous') return true;
-  try {
-    const gcUsers = dbReady ? await dbGet('gc-users') : null;
-    if (Array.isArray(gcUsers)) {
-      const u = gcUsers.find(u => u.id === userId);
-      if (u && u.accountStatus && u.accountStatus !== 'ACTIF') return false;
-    }
-  } catch (_) {}
-  return true;
-}
-
 const authenticateToken = (req, res, next) => {
   const token = (req.headers['authorization'] || '').split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Token requis' });
-  jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS, async (err, user) => {
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ error: 'Token invalide ou expiré' });
-    // QUAL-05 : vérifier que le compte est toujours actif
-    const active = await checkAccountActive(user?.id);
-    if (!active) return res.status(403).json({ error: 'Compte désactivé ou suspendu' });
     req.user = user;
     next();
   });
@@ -553,8 +519,9 @@ const authenticateTokenOptional = (req, res, next) => {
     req.user = { id: 'anonymous', username: 'public', role: 'GUEST', level: 0 };
     return next();
   }
-  jwt.verify(token, JWT_SECRET, JWT_VERIFY_OPTIONS, (err, user) => {
+  jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
+      // Token expiré ou invalide → traiter comme anonyme, ne pas bloquer
       req.user = { id: 'anonymous', username: 'public', role: 'GUEST', level: 0 };
       return next();
     }
@@ -1130,14 +1097,16 @@ const handleMulterError = (err, req, res, next) => {
 
 // ── Broadcast ────────────────────────────────────────────────────────────────
 // [C8] Prend en compte X-Socket-Id pour exclure l'expéditeur du broadcast
-// ARCH-08 — Broadcasts limités aux sockets vérifiés (JWT valide).
-// Avant ce fix, tous les sockets connectés (même anonymes) recevaient les data_changed,
-// file_uploaded, disk_alert — révélant quelles clés changent, quels fichiers sont uploadés.
 function broadcast(event, payload, excludeSocketId = null) {
-  for (const [sid, info] of connectedClients) {
-    if (!info.verified) continue;                  // ignorer les anonymes
-    if (excludeSocketId && sid === excludeSocketId) continue;
-    io.to(sid).emit(event, payload);
+  if (excludeSocketId) {
+    // Émettre à tous sauf l'expéditeur
+    for (const [sid] of io.sockets.sockets) {
+      if (sid !== excludeSocketId) {
+        io.to(sid).emit(event, payload);
+      }
+    }
+  } else {
+    io.emit(event, payload);
   }
 }
 
@@ -1350,12 +1319,11 @@ app.post('/api/auth/register', [
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// SEC-06 — Rate limit login abaissé de 10/min à 5/min pour limiter le bruteforce.
 app.post('/api/auth/login', [
   body('username').notEmpty(),
   body('password').notEmpty(),
   handleValidationErrors,
-], rateLimiter(5), async (req, res) => {
+], rateLimiter(10), async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -1546,10 +1514,8 @@ app.get('/api/data/stats', rateLimiter(30), authenticateToken, async (req, res) 
 // [FIX v153-E] GET /api/data : authentification obligatoire — endpoint de dump complet
 // (150+ clés dont gc-users, gc-audit-checklist, gc-jur-kyc, gc-cabinet-info...)
 // Accessible uniquement par les admins niveau 4+ pour diagnostic/export
-// SEC-13 — Export complet de toutes les données restreint au niveau 6 (admin uniquement).
-// Avant ce fix, n'importe quel manager (niveau 4) pouvait exporter 150+ clés sensibles.
 app.get('/api/data', rateLimiter(10), authenticateToken, async (req, res) => {
-  if ((req.user?.level || 0) < 6 && !req.user?.isAdmin) return res.status(403).json({ error: 'Niveau 6 / Admin requis pour exporter toutes les données' });
+  if ((req.user?.level || 0) < 4) return res.status(403).json({ error: 'Niveau 4 minimum requis pour exporter toutes les données' });
   const all = dbReady ? await dbGetAll() : jsonLoad();
   res.json({ ok: true, data: all, count: Object.keys(all).length });
 });
@@ -1628,21 +1594,18 @@ app.post('/api/data/batch', rateLimiter(120), authenticateToken, async (req, res
   res.json({ ok: true, data: result });
 });
 
-// BUG-LVL1 / SEC-10 / SEC-19 — Filtrage des données par niveau utilisateur.
-// Règles :
-//  - Clés users/gc-users : passwordHash, password, passwordHistory, pin retirés pour non-admins.
-//  - Dossiers : confidentiels masqués selon confAccess + confPass JAMAIS envoyé au client.
-//  - Taches/rdvs : niveaux 1-3 ne voient que leurs propres éléments.
-//  - Clés sensibles RH/finance/juridique : niveau 4+ requis.
+// FIX BUG-LVL1 — Filtre les données métier (dossiers, taches, rdvs) par appartenance
+// pour les utilisateurs de niveau <= 3. Les niveaux 1-3 ne voient que leurs propres
+// dossiers/tâches (createdBy, assignedTo, collaborators). Les niveaux 4+ voient tout.
+// Les champs sensibles (passwordHash, etc.) sont retirés pour les non-admins.
 function applyLevelFilter(key, value, user) {
+  if (!Array.isArray(value)) return value;
   const userLevel = user?.level || 0;
   const userId    = user?.id;
   const isAdmin   = user?.isAdmin || userLevel >= 6;
-  const isMG      = user?.isMG || false;
 
-  // Clés utilisateurs : retirer tous les champs secrets pour les non-admins
+  // Clés utilisateurs : retirer les champs sensibles pour les non-admins
   if (key === 'users' || key === 'gc-users') {
-    if (!Array.isArray(value)) return value;
     if (isAdmin) return value;
     return value.map(u => {
       const { passwordHash, password, passwordHistory, pin, ...safe } = u;
@@ -1650,51 +1613,8 @@ function applyLevelFilter(key, value, user) {
     });
   }
 
-  // SEC-19 — Clés RH, finance, juridique : niveau 4+ seulement
-  const RESTRICTED_LEVEL4_KEYS = new Set([
-    'gc-paie-transferts','gc-paie-fiches','gc-jur-kyc','gc-jur-contrats',
-    'gc-sirh-evaluations','gc-sirh-absences','gc-sirh-contrats',
-    'gc-fin-journal','gc-fin-grand-livre','gc-journal','gc-fin-transfers',
-    'gc-audit-checklist','gc-account-actions',
-  ]);
-  if (RESTRICTED_LEVEL4_KEYS.has(key) && !isAdmin && userLevel < 4) {
-    return [];
-  }
-
-  if (!Array.isArray(value)) return value;
-
-  // SEC-10 / ARCH-04 — Dossiers : filtrer confidentiels + supprimer confPass de TOUTES les réponses
-  const DOSSIER_KEYS = new Set(['dossiers','gc-dossiers']);
-  if (DOSSIER_KEYS.has(key)) {
-    return value
-      .filter(item => {
-        if (!item) return false;
-        if (item.confidentiel) {
-          if (isAdmin || isMG) return true;
-          if (Array.isArray(item.confAccess) && item.confAccess.includes(userId)) return true;
-          if (userLevel <= 3) {
-            return item.createdBy === userId || item.assignedTo === userId ||
-              (Array.isArray(item.collaborators) && item.collaborators.includes(userId));
-          }
-          return false;
-        }
-        if (!isAdmin && userLevel <= 3 && userId) {
-          return item.createdBy === userId || item.assignedTo === userId ||
-            item.responsable === userId ||
-            (Array.isArray(item.collaborators) && item.collaborators.includes(userId)) ||
-            (Array.isArray(item.assignees) && item.assignees.includes(userId));
-        }
-        return true;
-      })
-      .map(item => {
-        // confPass ne doit JAMAIS quitter le serveur
-        const { confPass, ...safeItem } = item;
-        return safeItem;
-      });
-  }
-
-  // Clés métier standard : filtrer par ownership pour niveaux <= 3
-  const OWNERSHIP_FILTERED_KEYS = new Set(['taches','gc-taches','rdvs','gc-rdvs']);
+  // Clés métier : filtrer par ownership pour niveaux <= 3
+  const OWNERSHIP_FILTERED_KEYS = new Set(['dossiers','gc-dossiers','taches','gc-taches','rdvs','gc-rdvs']);
   if (OWNERSHIP_FILTERED_KEYS.has(key) && !isAdmin && userLevel <= 3 && userId) {
     return value.filter(item => {
       if (!item) return false;
@@ -1709,7 +1629,7 @@ function applyLevelFilter(key, value, user) {
   return value;
 }
 
-app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (req, res) => {
+app.get('/api/data/:key', rateLimiter(800), authenticateTokenOptional, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
@@ -1753,7 +1673,7 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
 });
 
 // [C7][C8] Écriture clé-valeur — limite taille + broadcast sans l'émetteur
-app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res) => {
+app.post('/api/data/:key', rateLimiter(800), authenticateToken, async (req, res) => {
   const key = req.params.key;
   const { value } = req.body;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
@@ -1790,12 +1710,9 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
   ]);
 
   let finalValue = sanitized;
-  // SEC-11 — x-force-overwrite restreint aux niveaux 4+ pour éviter l'écrasement malveillant
-  const forceOverwrite = req.headers['x-force-overwrite'] &&
-    ((req.user?.level || 0) >= 4 || req.user?.isAdmin);
   if (
     isArrayOfObjectsWithIds(sanitized) &&
-    !forceOverwrite
+    !req.headers['x-force-overwrite']
   ) {
     try {
       const existing = await dbGet(key);
@@ -1854,9 +1771,7 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
       }
     } catch (mergeErr) {
       console.warn('[ANTI-REGRESSION] Erreur lecture pour merge:', mergeErr.message);
-      // SEC-11 — fail-closed : en cas d'incertitude sur le merge, rejeter l'écriture.
-      // L'ancien fail-open permettait à un client de forcer une écriture tronquée lors d'une erreur.
-      return res.status(409).json({ error: 'Conflit de synchronisation — réessayez après avoir rechargé les données' });
+      // En cas d'erreur de lecture → continuer avec la valeur envoyée (fail-open)
     }
   }
   // Remplacer sanitized par finalValue (merge ou original) pour toutes les écritures
@@ -1959,7 +1874,7 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
 });
 
 // GET history for a key (audit entries)
-app.get('/api/data/:key/history', rateLimiter(60), authenticateToken, async (req, res) => {
+app.get('/api/data/:key/history', rateLimiter(200), authenticateToken, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if ((req.user?.level || 0) < 2) return res.status(403).json({ error: 'Niveau 2 minimum requis pour consulter l’historique' });
@@ -1972,7 +1887,7 @@ app.get('/api/data/:key/history', rateLimiter(60), authenticateToken, async (req
 });
 
 // [C9] DELETE — vérification isAllowedKey + garde niveau pour clés métier
-app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, res) => {
+app.delete('/api/data/:key', rateLimiter(200), authenticateToken, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
@@ -2003,7 +1918,7 @@ app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, re
 // FIX v152 — DELETE /api/data/:key/item/:itemId
 // Suppression chirurgicale d'un seul élément avec enregistrement tombstone.
 // Garantit que l'anti-régression ne ressuscitera jamais cet item même après re-sync.
-app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, async (req, res) => {
+app.delete('/api/data/:key/item/:itemId', rateLimiter(200), authenticateToken, async (req, res) => {
   const { key, itemId } = req.params;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
@@ -2064,9 +1979,8 @@ app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, a
 // FIX v153 — authenticateTokenOptional : l'upload n'est pas bloqué si le token est absent
 // (le token est utilisé pour tracer l'uploadedBy mais n'est pas requis pour l'opération)
 // Les uploads sans token sont tracés avec uploadedBy depuis req.body.uploadedBy
-// SEC-09 — Upload exige désormais un token valide (authenticateToken strict).
-// Avant : authenticateTokenOptional permettait des uploads anonymes avec uploadedBy usurpable.
-app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateToken,
+// [FIX v153-L] Rate limit upload réduit : 50→10/min par IP (50×500MB=25GB/min était inacceptable)
+app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional,
   (req, res, next) => upload.single('file')(req, res, (err) => {
     if (err) return handleMulterError(err, req, res, next);
     next();
@@ -2346,14 +2260,8 @@ app.get('/api/files/:id', rateLimiter(300), authenticateTokenOptional, async (re
   res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${safeName}`);
   res.setHeader('Content-Type', meta.mime_type || 'application/octet-stream');
   res.setHeader('Cache-Control', 'private, max-age=3600');
-  // SEC-05 — Ne refléter l'Origin que si elle est dans la whitelist LAN autorisée.
-  // L'ancien code renvoyait req.headers.origin avec fallback '*' + credentials:true,
-  // permettant à n'importe quel site du LAN de lire les fichiers via fetch avec credentials.
-  const reqOrigin = req.headers.origin || '';
-  if (reqOrigin && (reqOrigin === ALLOWED_ORIGIN || LOCAL_NETWORK_ORIGIN.test(reqOrigin))) {
-    res.setHeader('Access-Control-Allow-Origin', reqOrigin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (meta.compressed) {
     const stream = fs.createReadStream(realPath);

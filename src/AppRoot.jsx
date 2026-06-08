@@ -1568,41 +1568,63 @@ export default function App() {
     if (!confirmed) return;
     const code = await gcPrompt("Saisir le code de confirmation : RESET-GC-SI");
     if ((code||"").trim() !== "RESET-GC-SI") { gcAlert("❌ Code incorrect. Réinitialisation annulée."); return; }
+    
     // FIX v92 Bug#7d — Object.keys() snapshot complet, évite décalage d'index pendant suppression
     const keysToDelete = Object.keys(localStorage).filter(
       k => k && (k.startsWith("GC_SI") || k.startsWith("gc-") || k.startsWith("gc_"))
     );
     keysToDelete.forEach(k => { try { _lsRm(k); } catch (_) {} });
+    
+    // ── Nettoyage agressif des timestamps de cache pour éviter la résurrection des données ──
+    const allKeys = Object.keys(localStorage);
+    allKeys.filter(k => k && (k.startsWith("__ts__:") || k.startsWith("__svts__:"))).forEach(k => { try { _lsRm(k); } catch (_) {} });
+    
     const adminOnly = [{ ...INITIAL_USERS[0] }]; // uniquement USR-ADM-000
-    setUsersState(adminOnly); setProdUsers(adminOnly); dsSave("users", adminOnly);
-    setDossiersState([]); setProdDossiers([]); dsSave("dossiers", []);
-    setTachesState([]); setProdTaches([]); dsSave("taches", []);
-    setRdvsState([]); setProdRdvs([]); dsSave("rdvs", []);
-    setPendingApprovalsState([]); setProdPending([]); dsSave("pendingApprovals", []);
-    setPartnersStateRaw([]); setProdPartners([]); dsSave("partners", []);
+    setUsersState(adminOnly); setProdUsers(adminOnly); 
+    setDossiersState([]); setProdDossiers([]); 
+    setTachesState([]); setProdTaches([]);
+    setRdvsState([]); setProdRdvs([]); 
+    setPendingApprovalsState([]); setProdPending([]); 
+    setPartnersStateRaw([]); setProdPartners([]);
+    
+    // Attendre que TOUTES les syncs soient terminées avant déconnexion
+    const syncPromises = [];
+    syncPromises.push(dsSave("users", adminOnly, null, { forceOverwrite: true }).catch(() => {}));
+    syncPromises.push(dsSave("dossiers", [], null, { forceOverwrite: true }).catch(() => {}));
+    syncPromises.push(dsSave("taches", [], null, { forceOverwrite: true }).catch(() => {}));
+    syncPromises.push(dsSave("rdvs", [], null, { forceOverwrite: true }).catch(() => {}));
+    syncPromises.push(dsSave("pendingApprovals", [], null, { forceOverwrite: true }).catch(() => {}));
+    syncPromises.push(dsSave("partners", [], null, { forceOverwrite: true }).catch(() => {}));
+    
     // -- SIRH --
-    try { _lsSet("gc-sirh-presences", "[]"); dsSave("gc-sirh-presences", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-sirh-leaves", "[]"); dsSave("gc-sirh-leaves", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-sirh-recrutements", "[]"); dsSave("gc-sirh-recrutements", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-sirh-evaluations", "[]"); dsSave("gc-sirh-evaluations", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-paie-transferts", "[]"); dsSave("gc-paie-transferts", []).catch(() => {}); } catch (_) {}
+    try { _lsSet("gc-sirh-presences", "[]"); syncPromises.push(dsSave("gc-sirh-presences", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-sirh-leaves", "[]"); syncPromises.push(dsSave("gc-sirh-leaves", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-sirh-recrutements", "[]"); syncPromises.push(dsSave("gc-sirh-recrutements", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-sirh-evaluations", "[]"); syncPromises.push(dsSave("gc-sirh-evaluations", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-paie-transferts", "[]"); syncPromises.push(dsSave("gc-paie-transferts", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    
     // -- Documents --
-    try { _lsSet("gc-internal-docs", "[]"); dsSave("gc-internal-docs", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-external-docs", "[]"); dsSave("gc-external-docs", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-dossier-files", "[]"); dsSave("gc-dossier-files", []).catch(() => {}); } catch (_) {}
+    try { _lsSet("gc-internal-docs", "[]"); syncPromises.push(dsSave("gc-internal-docs", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-external-docs", "[]"); syncPromises.push(dsSave("gc-external-docs", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-dossier-files", "[]"); syncPromises.push(dsSave("gc-dossier-files", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    
     // -- Messagerie --
     try { _lsSet("gc-messages-global", "[]"); } catch (_) {}
     try { _lsSet("gc-courrier-docs", "[]"); } catch (_) {}
+    
     // -- Journaux --
-    try { _lsSet("gc-session-logs", "[]"); dsSave("gc-session-logs", []).catch(() => {}); } catch (_) {}
-    try { _lsSet("gc-account-actions", "[]"); dsSave("gc-account-actions", []).catch(() => {}); } catch (_) {}
+    try { _lsSet("gc-session-logs", "[]"); syncPromises.push(dsSave("gc-session-logs", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    try { _lsSet("gc-account-actions", "[]"); syncPromises.push(dsSave("gc-account-actions", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
     try { _lsSet("gc-error-log", "[]"); } catch (_) {}
+    
     // -- Accès --
     try { _lsRm("gc-pending-connections"); } catch (_) {}
     try { _lsRm("gc-app-habilitations"); } catch (_) {}
     try { _lsRm("gc-app-access-codes"); } catch (_) {}
+    
     // -- Codification & Archivage --
-    try { _lsSet("gc-codif-registry", "[]"); dsSave("gc-codif-registry", []).catch(() => {}); } catch (_) {}
+    try { _lsSet("gc-codif-registry", "[]"); syncPromises.push(dsSave("gc-codif-registry", [], null, { forceOverwrite: true }).catch(() => {})); } catch (_) {}
+    
     // -- Productivité --
     try { _lsRm("gc-kanban-cols-v2"); } catch (_) {}
     try { _lsRm("gc-kanban-cards-v2"); } catch (_) {}
@@ -1616,24 +1638,39 @@ export default function App() {
     try { _lsRm("gc-archives"); } catch (_) {}
     try { _lsRm("gc-standalone-docs"); } catch (_) {}
     try { _lsRm("gc-security-alerts"); } catch (_) {}
-    try { _lsRm("gc-system-msgs"); } catch (_) {}    // FIX v72 — Messages système (persistés depuis v72)
+    try { _lsRm("gc-system-msgs"); } catch (_) {}
+    
     // -- Badges "vu" sidebar (tous utilisateurs) --
     // FIX v92 Bug#7 — Snapshot complet des clés AVANT suppression (évite décalage d'index)
     try {
-      const allKeys = Object.keys(localStorage);
-      allKeys.filter(k => k && k.startsWith("gc-seen-badges:"))
+      const allKeysClean = Object.keys(localStorage);
+      allKeysClean.filter(k => k && k.startsWith("gc-seen-badges:"))
              .forEach(k => { try { _lsRm(k); } catch(_) {} });
     } catch(_) {}
+    
     // -- Notifications de tous les utilisateurs --
     try {
-      const allKeys = Object.keys(localStorage);
-      allKeys.filter(k => k && k.startsWith("GC_SI_v12:notif:"))
+      const allKeysClean = Object.keys(localStorage);
+      allKeysClean.filter(k => k && k.startsWith("GC_SI_v12:notif:"))
              .forEach(k => { try { _lsRm(k); } catch(_) {} });
     } catch(_) {}
+    
     // -- Collaborateurs externes (réinitialiser à la liste par défaut) --
-    setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS); dsSave("partners", INITIAL_PARTNERS);
+    setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS); 
+    syncPromises.push(dsSave("partners", INITIAL_PARTNERS, null, { forceOverwrite: true }).catch(() => {}));
+    
     // FIX v151 — Effacer les tombstones lors de la réinitialisation totale
     try { dsClearTombstones(); } catch (_) {}
+    
+    // ✅ CRITICAL FIX v161 — Attendre l'achèvement de TOUTES les syncs avant déconnexion
+    // Sans cette attente, les données peuvent être rechargées lors de la reconnexion
+    // si les syncs n'étaient pas terminées quand on appelle setCurrentUser(null)
+    try {
+      await Promise.all(syncPromises);
+      // Attendre 500ms supplémentaires pour que le serveur finisse de traiter
+      await new Promise(r => setTimeout(r, 500));
+    } catch (_) {}
+    
     setSessionLogs([]);
     gcAlert("✅ Réinitialisation complète effectuée.\n\nToutes les données ont été effacées.\nSeul le compte Compte superviseur est conservé.\nLes partenaires de base ont été restaurés.\n\nVous allez être déconnecté.");
     setCurrentUser(null);
