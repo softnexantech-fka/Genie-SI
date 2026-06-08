@@ -717,6 +717,8 @@ function addColumnIfMissing(table, column, definition) {
 function ensureSiFilesColumns() {
   addColumnIfMissing('si_files', 'compressed', 'INTEGER DEFAULT 0');
   addColumnIfMissing('si_files', 'compressed_path', 'TEXT DEFAULT NULL');
+  // FIX BUG-FILE-ACCESS : Ajout colonne access_level pour contrôle d'accès par niveau
+  addColumnIfMissing('si_files', 'access_level', 'INTEGER DEFAULT 1');
 }
 
 async function createTablesAsync() {
@@ -1592,6 +1594,41 @@ app.post('/api/data/batch', rateLimiter(120), authenticateToken, async (req, res
   res.json({ ok: true, data: result });
 });
 
+// FIX BUG-LVL1 — Filtre les données métier (dossiers, taches, rdvs) par appartenance
+// pour les utilisateurs de niveau <= 3. Les niveaux 1-3 ne voient que leurs propres
+// dossiers/tâches (createdBy, assignedTo, collaborators). Les niveaux 4+ voient tout.
+// Les champs sensibles (passwordHash, etc.) sont retirés pour les non-admins.
+function applyLevelFilter(key, value, user) {
+  if (!Array.isArray(value)) return value;
+  const userLevel = user?.level || 0;
+  const userId    = user?.id;
+  const isAdmin   = user?.isAdmin || userLevel >= 6;
+
+  // Clés utilisateurs : retirer les champs sensibles pour les non-admins
+  if (key === 'users' || key === 'gc-users') {
+    if (isAdmin) return value;
+    return value.map(u => {
+      const { passwordHash, password, passwordHistory, pin, ...safe } = u;
+      return safe;
+    });
+  }
+
+  // Clés métier : filtrer par ownership pour niveaux <= 3
+  const OWNERSHIP_FILTERED_KEYS = new Set(['dossiers','gc-dossiers','taches','gc-taches','rdvs','gc-rdvs']);
+  if (OWNERSHIP_FILTERED_KEYS.has(key) && !isAdmin && userLevel <= 3 && userId) {
+    return value.filter(item => {
+      if (!item) return false;
+      if (item.createdBy === userId) return true;
+      if (item.assignedTo === userId) return true;
+      if (item.responsable === userId) return true;
+      if (Array.isArray(item.collaborators) && item.collaborators.includes(userId)) return true;
+      if (Array.isArray(item.assignees) && item.assignees.includes(userId)) return true;
+      return false;
+    });
+  }
+  return value;
+}
+
 app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
@@ -1600,7 +1637,11 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
     // Use Redis cache for hot keys when available
     if (redisAvailable && CACHEABLE_KEYS.has(key)) {
       const cached = await redisGetCache(key);
-      if (cached !== null) return res.json({ ok: true, key, value: cached, source: 'redis' });
+      // Appliquer le filtre niveau même sur les données en cache Redis
+      if (cached !== null) {
+        const filtered = applyLevelFilter(key, cached, req.user);
+        return res.json({ ok: true, key, value: filtered, source: 'redis' });
+      }
     }
 
     if (dbReady) {
@@ -1613,14 +1654,18 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
       if (meta === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
       const { value, updatedAt } = meta;
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
-      return res.json({ ok: true, key, value, updatedAt });
+      // FIX BUG-LVL1 : Appliquer le filtrage par niveau avant de retourner
+      const filteredValue = applyLevelFilter(key, value, req.user);
+      return res.json({ ok: true, key, value: filteredValue, updatedAt });
     }
 
     const data = jsonLoad();
     if (!(key in data)) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
     const v = data[key];
     if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, v);
-    return res.json({ ok: true, key, value: v });
+    // FIX BUG-LVL1 : Appliquer le filtrage par niveau avant de retourner
+    const filteredV = applyLevelFilter(key, v, req.user);
+    return res.json({ ok: true, key, value: filteredV });
   } catch (e) {
     console.error('[GET /api/data/:key] error', e && e.message);
     return res.status(500).json({ error: 'Erreur interne' });
@@ -1841,11 +1886,25 @@ app.get('/api/data/:key/history', rateLimiter(60), authenticateToken, async (req
   } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 
-// [C9] DELETE — vérification isAllowedKey manquante ajoutée
+// [C9] DELETE — vérification isAllowedKey + garde niveau pour clés métier
 app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
+  // FIX BUG-DEL1 — Les clés métier (dossiers, taches, rdvs, etc.) ne peuvent être supprimées
+  // en intégralité que par un niveau 5+ ou admin. Évite qu'un niveau 1 vide toute la base.
+  const BUSINESS_FULL_DELETE_LEVEL = new Set([
+    'dossiers','gc-dossiers','taches','gc-taches','rdvs','gc-rdvs',
+    'partners','gc-partners','gc-dossier-files','gc-files','gc-docs-unified',
+    'gc-messages','gc-notifications',
+  ]);
+  if (BUSINESS_FULL_DELETE_LEVEL.has(key)) {
+    const lvl = req.user?.level || 0;
+    if (!req.user?.isAdmin && lvl < 5) {
+      await auditLog(req.user?.id || 'anon', 'DELETE_DENIED', key, 'Niveau 5+ requis pour suppression totale', req.ip);
+      return res.status(403).json({ error: 'Niveau 5+ requis pour supprimer une clé métier complète' });
+    }
+  }
   const userId = req.body?.userId || req.user?.id || 'anonymous';
   if (dbReady) {
     await dbDelete(key);
@@ -1864,6 +1923,27 @@ app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, a
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
   if (!itemId) return res.status(400).json({ error: 'itemId requis' });
+
+  // FIX BUG-DEL2 — Vérification de propriété pour suppression d'item : un utilisateur
+  // de niveau 1-2 ne peut supprimer que ses propres items (createdBy ou assignedTo).
+  // Les niveaux 3+ et admins peuvent supprimer n'importe quel item.
+  const requestorLevel = req.user?.level || 0;
+  const requestorId = req.user?.id;
+  if (requestorLevel < 3 && !req.user?.isAdmin && requestorId) {
+    try {
+      const currentForCheck = dbReady ? await dbGet(key) : null;
+      if (Array.isArray(currentForCheck)) {
+        const targetItem = currentForCheck.find(i => i?.id && String(i.id) === String(itemId));
+        if (targetItem) {
+          const isOwner = targetItem.createdBy === requestorId || targetItem.assignedTo === requestorId || targetItem.responsable === requestorId;
+          if (!isOwner) {
+            await auditLog(requestorId, 'DELETE_ITEM_DENIED', key, `Item ${itemId} non-propriétaire`, req.ip);
+            return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres éléments' });
+          }
+        }
+      }
+    } catch (_) {}
+  }
 
   // 1. Enregistrer le tombstone AVANT toute modification
   try {
@@ -1907,7 +1987,7 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
   }),
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
-    const { dossierId, module: mod = 'general', uploadedBy } = req.body;
+    const { dossierId, module: mod = 'general', uploadedBy, accessLevel } = req.body;
     const fileId  = `F-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const hash    = crypto.createHash('md5');
     const stream  = fs.createReadStream(req.file.path);
@@ -1915,6 +1995,8 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
     const checksum = hash.digest('hex');
     // Tracer l'uploader : priorité body.uploadedBy, puis user authentifié, puis 'anonymous'
     const uploaderId = uploadedBy || req.user?.id || 'anonymous';
+    // FIX BUG-FILE-ACCESS : access_level envoyé par le client, clamped entre 1 et 6
+    const fileAccessLvl = Math.min(6, Math.max(1, parseInt(accessLevel || '1', 10) || 1));
     const { compressed, diskPath, compressedPath } = await compressIfNeeded(req.file.path, req.file.mimetype, req.file.size);
     const meta = {
       id: fileId, filename: req.file.filename, original_name: req.file.originalname,
@@ -1925,6 +2007,7 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
       compressed: compressed ? 1 : 0,
       compressed_path: compressedPath,
       checksum,
+      access_level: fileAccessLvl,
     };
     // Malware scan (if clamscan available)
     try {
@@ -1941,8 +2024,8 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
       return res.status(503).json({ ok: false, error: 'Base de données indisponible pour l\'upload du fichier' });
     }
     try {
-      const sql = `INSERT INTO si_files(id,filename,original_name,mime_type,size_bytes,dossier_id,module,uploaded_by,disk_path,compressed,compressed_path,checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`;
-      const params = [meta.id, meta.filename, meta.original_name, meta.mime_type, meta.size_bytes, meta.dossier_id, meta.module, meta.uploaded_by, meta.disk_path, meta.compressed, meta.compressed_path, meta.checksum];
+      const sql = `INSERT INTO si_files(id,filename,original_name,mime_type,size_bytes,dossier_id,module,uploaded_by,disk_path,compressed,compressed_path,checksum,access_level) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+      const params = [meta.id, meta.filename, meta.original_name, meta.mime_type, meta.size_bytes, meta.dossier_id, meta.module, meta.uploaded_by, meta.disk_path, meta.compressed, meta.compressed_path, meta.checksum, meta.access_level];
       if (dbMode === 'sqlite3') await runAsync(sql, params);
       else db.prepare(sql).run(...params);
       // Insert file version snapshot for versioning/history
@@ -2147,6 +2230,17 @@ app.get('/api/files/:id', rateLimiter(300), authenticateTokenOptional, async (re
     return res.status(500).json({ error: 'Erreur base de données' });
   }
   if (!meta) return res.status(404).json({ error: 'Fichier introuvable' });
+
+  // FIX BUG-FILE-ACCESS — Vérification du niveau d'accès avant d'envoyer le fichier.
+  // Sans ce garde, n'importe qui (même anonyme) pouvait télécharger des fichiers
+  // marqués confidentiels (access_level élevé) en connaissant simplement leur ID.
+  const fileAccessLevel = meta.access_level || 1;
+  const userLevel = req.user?.level || 0;
+  const isAdminUser = req.user?.isAdmin || userLevel >= 6;
+  if (userLevel < fileAccessLevel && !isAdminUser) {
+    await auditLog(req.user?.id || 'anonymous', 'FILE_ACCESS_DENIED', id, `Niv. ${fileAccessLevel} requis, utilisateur niv. ${userLevel}`, req.ip);
+    return res.status(403).json({ error: `Habilitation insuffisante — niveau ${fileAccessLevel}+ requis pour ce fichier` });
+  }
 
   // Validation anti-path-traversal : le chemin absolu doit rester dans UPLOADS_DIR
   const realPath = path.resolve(meta.disk_path || meta.compressed_path || '');

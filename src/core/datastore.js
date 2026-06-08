@@ -875,9 +875,13 @@ export function dsStartSync(onUpdate) {
   // FIX SYNC-P1 — Heartbeat resync toutes les 60s pour les clients passifs.
   // Invalide le cache des clés critiques pour forcer un re-fetch discret en arrière-plan.
   // Évite qu'un client reste "bloqué" sur des données périmées s'il a manqué des broadcasts.
+  // FIX BUG-HB1 — Les clés métier (dossiers, taches, gc-dossier-files, gc-files) ont été retirées
+  // du heartbeat : leur invalidation toutes les 60s causait des pertes de données quand le re-fetch
+  // échouait (réseau lent) et que le fallback stale écrasait des données plus récentes côté React.
+  // Ces clés sont synchronisées via WebSocket broadcast (data_changed) et via le TTL naturel du cache.
   let _heartbeatTick = 0;
   const HEARTBEAT_KEYS = [
-    'users', 'gc-users', 'dossiers', 'taches', 'gc-dossier-files', 'gc-files',
+    'users', 'gc-users',
     'gc-notifications', 'gc-messages-global', 'gc-presence',
   ];
 
@@ -894,8 +898,9 @@ export function dsStartSync(onUpdate) {
         let invalidated = 0;
         HEARTBEAT_KEYS.forEach(k => {
           const cached = _cache.get(k);
-          // N'invalider que si la donnée a plus de 45s (évite d'écraser un fetch récent)
-          if (!cached || Date.now() - cached.ts > 45_000) {
+          // N'invalider que si la donnée a plus de 90s (augmenté de 45s → 90s pour éviter
+          // les pertes dues aux fallbacks stale lors de re-fetches en situation de latence)
+          if (!cached || Date.now() - cached.ts > 90_000) {
             _cache.delete(k);
             _pendingFetches.delete(k);
             invalidated++;
