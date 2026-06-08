@@ -1174,15 +1174,28 @@ io.on('connection', (socket) => {
     const batch = items.slice(0, 200);
     let synced = 0;
 
+    // FIX-FLUSH-TOMB : Charger les tombstones UNE FOIS avant la boucle de flush.
+    // Sans ce filtre, la file offline rejouait des snapshots antérieurs à une suppression,
+    // ressuscitant des éléments déjà supprimés par d'autres postes ou d'autres onglets.
+    let flushTombstones = {};
+    try { flushTombstones = (await dbGet('gc-tombstones')) || {}; } catch (_) {}
+    const _filterByTombstones = (key, value) => {
+      if (!Array.isArray(value)) return value;
+      const ids = new Set((flushTombstones[key] || []).map(String));
+      if (ids.size === 0) return value;
+      return value.filter(item => !item?.id || !ids.has(String(item.id)));
+    };
+
     const doFlush = async () => {
       for (const item of batch) {
         if (!item?.key || !isAllowedKey(item.key)) continue;
         if (item.value === undefined || item.value === null) continue;
         const validated = validateAndSanitizeValue(item.key, item.value);
         if (!validated.valid) continue;
-        const valJson = JSON.stringify(validated.sanitized);
+        const filtered = _filterByTombstones(item.key, validated.sanitized);
+        const valJson = JSON.stringify(filtered);
         if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
-        const ok = await dbSet(item.key, validated.sanitized, verifiedUserId);
+        const ok = await dbSet(item.key, filtered, verifiedUserId);
         if (ok) {
           synced++;
           broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now() }, socket.id);
@@ -1198,7 +1211,9 @@ io.on('connection', (socket) => {
             if (item.value === undefined || item.value === null) continue;
             const vr = validateAndSanitizeValue(item.key, item.value);
             if (!vr.valid) continue;
-            const val = JSON.stringify(vr.sanitized);
+            // FIX-FLUSH-TOMB : filtrer par tombstones dans la transaction synchrone aussi
+            const filtered = _filterByTombstones(item.key, vr.sanitized);
+            const val = JSON.stringify(filtered);
             if (Buffer.byteLength(val, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
             const ts = Math.floor(Date.now() / 1000);
             db.prepare(
@@ -1781,6 +1796,18 @@ app.post('/api/data/:key', rateLimiter(800), authenticateToken, async (req, res)
   const valJson = JSON.stringify(writeValue);
   if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) {
     return res.status(413).json({ error: `Valeur trop grande (max ${MAX_VALUE_MB} MB)` });
+  }
+
+  // [DEDUP] Si la valeur entrante est identique à la valeur stockée → pas d'écriture, pas de broadcast.
+  // Ceci casse la boucle infinie POST→broadcast→GET→POST sur les clés comme gc-app-habilitations.
+  // Skip uniquement si le client n'a pas positionné x-force-overwrite.
+  if (!req.headers['x-force-overwrite'] && dbReady) {
+    try {
+      const currentRaw = await dbGet(key);
+      if (JSON.stringify(currentRaw) === valJson) {
+        return res.status(200).json({ ok: true, noop: true });
+      }
+    } catch (_) {}
   }
 
   if (dbReady) {
@@ -2971,8 +2998,14 @@ async function start() {
       const validIds = new Set(allUsers.map(u => u.id));
       synced = synced.filter(g => validIds.has(g.id));
     }
-    await dbSet('gc-users', synced);
-    console.log(`[BOOT-SYNC] gc-users synchronisé : ${synced.length} comptes (+${added} ajoutés, ${updated} MàJ)`);
+    // FIX-BOOT-UNCOND : N'écrire gc-users que si quelque chose a réellement changé.
+    // L'écriture inconditionnelle précédente déclenchait un broadcast inutile à chaque démarrage.
+    if (added > 0 || updated > 0 || synced.length !== gcUsers.length) {
+      await dbSet('gc-users', synced);
+      console.log(`[BOOT-SYNC] gc-users synchronisé : ${synced.length} comptes (+${added} ajoutés, ${updated} MàJ)`);
+    } else {
+      console.log(`[BOOT-SYNC] gc-users déjà à jour : ${synced.length} comptes (aucune écriture)`);
+    }
   } catch(e) { console.warn('[BOOT-SYNC] Échec:', e.message); };
 
   // [C4] Checkpoint WAL périodique (toutes les 5 min) pour éviter croissance WAL
@@ -3029,50 +3062,16 @@ async function start() {
   };
   setInterval(_scheduleTombstonePurge, 60 * 60 * 1000); // vérification horaire
 
-  // TASK1 — Backup SQLite journalier : immédiat au démarrage puis toutes les 24h
-  try { await runBackup(); } catch (_) {}
-  setInterval(async () => {
+  // FIX-BOOT-DEDUP : Backup différé de 30s après le démarrage (évite une écriture disque lourde
+  // pendant l'initialisation). Le backup 6h (l.2991) couvre les runs suivants.
+  setTimeout(async () => {
     try { await runBackup(); } catch (_) {}
-  }, 24 * 60 * 60 * 1000);
+  }, 30_000);
+  // NOTE : le setInterval 24h a été supprimé — le backup auto 6h (createBackup, l.2991) suffit.
 
-  // [FIX-BOOT] Bootstrap gc-users depuis 'users' si des comptes manquent (premier démarrage)
-  try {
-    // [FIX-WAL] Forcer checkpoint WAL avant lecture pour éviter données obsolètes
-    if (dbMode === 'better-sqlite3') {
-      db.pragma('wal_checkpoint(FULL)');
-    } else if (dbMode === 'sqlite3') {
-      await runAsync('PRAGMA wal_checkpoint(FULL)');
-    }
-    const gcUsers   = await dbGet('gc-users') || [];
-    const allUsers  = await dbGet('users')    || [];
-    if (Array.isArray(allUsers) && allUsers.length > 0) {
-      let changed = false;
-      for (const u of allUsers) {
-        const exists = gcUsers.some(g => g.id === u.id || g.username === u.alias || g.email === u.email);
-        if (!exists && (u.passwordHash || u.password)) {
-          gcUsers.push({
-            id:            u.id,
-            username:      u.alias || u.id,
-            email:         u.email || '',
-            passwordHash:  u.passwordHash || '',
-            role:          u.role || 'Collaborateur',
-            level:         u.level ?? 1,
-            accountStatus: u.accountStatus || 'ACTIF',
-          });
-          changed = true;
-          console.log(`[BOOT] Compte '${u.alias || u.id}' ajouté à gc-users depuis users`);
-        }
-        // [FIX-AUTH-ID] Corriger l'ID "admin" → vrai ID du compte dans 'users'
-        const gcEntry = gcUsers.find(g => g.id === 'admin' && (g.username === u.alias || g.email === u.email));
-        if (gcEntry && u.id && gcEntry.id !== u.id) {
-          console.log(`[BOOT] Correction ID gc-users : "${gcEntry.id}" → "${u.id}" pour ${gcEntry.username}`);
-          gcEntry.id = u.id;
-          changed = true;
-        }
-      }
-      if (changed) await dbSet('gc-users', gcUsers);
-    }
-  } catch (e) { console.warn('[BOOT] Bootstrap gc-users partiel:', e.message); }
+  // FIX-BOOT-DEDUP : Le second bloc [FIX-BOOT] bootstrap gc-users (anciennement ici) a été
+  // fusionné dans le premier bloc [BOOT-SYNC] ci-dessus qui est plus complet et évite le
+  // wal_checkpoint(FULL) coûteux au démarrage ainsi que la double écriture gc-users.
 
   // [FIX-EADDRINUSE] Gestion propre du port déjà utilisé
   server.on('error', (err) => {

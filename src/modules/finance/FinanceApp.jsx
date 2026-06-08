@@ -1968,7 +1968,11 @@ export default function App() {
   const saveAppHabilitations = useCallback((v) => {
     setAppHabilitations(prev => {
       const resolved = typeof v === 'function' ? v(prev) : v;
-      try { _lsSet("gc-app-habilitations", JSON.stringify(resolved)); dsSave("gc-app-habilitations", resolved).catch(err => gcToast.syncError('', err)); } catch (_) {}
+      const resolvedJson = JSON.stringify(resolved);
+      try { _lsSet("gc-app-habilitations", resolvedJson); } catch (_) {}
+      if (resolvedJson !== JSON.stringify(prev)) {
+        dsSave("gc-app-habilitations", resolved).catch(err => gcToast.syncError('', err));
+      }
       return resolved;
     });
   }, []);

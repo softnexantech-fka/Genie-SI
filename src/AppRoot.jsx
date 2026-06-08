@@ -9,7 +9,7 @@ import {
   _gcProxyFetch,
   _gcEncrypt, _lsGetSecure, _lsSetSecure,
   _migrateDGAccount, _checkSchemaVersion, _migrateLS, SIErrorBoundary,
-  gcMigrateFilesFromLS, gcSyncFilesToServer, gcFileStats, dsInitSync, dsStartSync, dsOnSync, dsSave, dsLoad, dsGet, dsClearTombstones,
+  gcMigrateFilesFromLS, gcSyncFilesToServer, gcFileStats, dsInitSync, dsStartSync, dsOnSync, dsSave, dsLoad, dsGet, dsBatchGet, dsClearTombstones,
   // FIX vSERVER-TIME — synchronisation heure serveur
   syncServerTime,
   // FIX v127 — fonctions IP centralisées
@@ -571,12 +571,41 @@ export default function App() {
           console.warn('[SI] Hydratation prioritaire users échouée:', e.message);
         }
 
+        // FIX-BATCH — Remplacer les 110+ dsGet individuels par un seul POST /api/data/batch.
+        // Élimine les 110+ erreurs 404 et les rafales 429 en console F12 au démarrage.
+        // Les clés manquantes retournent null (pas de 404 par clé).
+        // Les clés CRITICAL_EMPTY_ARRAY_KEYS qui nécessitent auth sans JWT retournent null silencieusement.
+        const CRITICAL_AUTH_KEYS = new Set(['gc-users','dossiers','gc-dossiers','taches','gc-taches','rdvs','gc-rdvs','partners','gc-partners']);
+        const allHydrateKeys = HYDRATE_MAP.map(h => h.key);
+        let batchServerData = {};
+        try {
+          batchServerData = await dsBatchGet(allHydrateKeys);
+        } catch (_) {
+          // Fallback : hydratation individuelle si batch échoue
+          console.warn('[SI] Batch hydratation échouée — fallback individuel');
+        }
+
+        // FIX-TOMB-BOOT : charger les tombstones serveur UNE FOIS avant tout push local.
+        // Sans ça, un poste hors-ligne au moment d'une suppression repoussait l'élément supprimé.
+        let bootTombstones = {};
+        try {
+          const tbs = await dsGet('gc-tombstones', null);
+          if (tbs && typeof tbs === 'object') bootTombstones = tbs;
+        } catch (_) {}
+        const _filterBootTombstones = (key, val) => {
+          if (!Array.isArray(val)) return val;
+          const ids = new Set((bootTombstones[key] || []).map(String));
+          if (ids.size === 0) return val;
+          return val.filter(item => !item?.id || !ids.has(String(item.id)));
+        };
+
         // FIX v155 — Hydration timeout: prevent page blocking on slow network
         // If hydration takes > 15s, unblock the page anyway. Hydration continues in background.
         const hydrationPromise = Promise.all(HYDRATE_MAP.map(async ({ key, setters, fallback }) => {
           try {
-            // null = clé absente (404), valeur réelle = clé présente (même si [])
-            const serverVal = await dsGet(key, null);
+            // FIX-BATCH : utiliser la valeur du batch ; fallback sur dsGet individuel si manquante
+            const serverVal = key in batchServerData ? batchServerData[key]
+              : (Object.keys(batchServerData).length === 0 ? await dsGet(key, null) : null);
 
             if (serverVal !== null) {
               // ══ CAS A : clé présente sur le serveur ══
@@ -605,8 +634,10 @@ export default function App() {
               } else {
                 // Local confirmé plus récent et au moins autant d'entrées → push vers serveur
                 if (localVal !== null && localVal !== undefined) {
-                  setters.forEach(fn => fn(localVal));
-                  dsSave(key, localVal).catch(() => {});
+                  // FIX-TOMB-BOOT : filtrer les tombstones avant de pousser le local vers le serveur
+                  const safeLocalVal = _filterBootTombstones(key, localVal);
+                  setters.forEach(fn => fn(safeLocalVal));
+                  dsSave(key, safeLocalVal).catch(() => {});
                   console.log(`[SI] ⬆️  Local plus récent — push vers serveur : ${key}`);
                 } else {
                   lsSave(key, serverVal);
@@ -663,11 +694,12 @@ export default function App() {
 
               if (hasCustom) {
                 // B1 — Migration : local a des données custom → initialiser le serveur
-                await dsSave(key, localVal);
-                console.log(`[SI] ⬆️  Migration → serveur : ${key} (${localVal.length} entrées)`);
+                // FIX-TOMB-BOOT : filtrer tombstones avant push de migration
+                const safeLocalVal = _filterBootTombstones(key, localVal);
+                await dsSave(key, safeLocalVal);
+                console.log(`[SI] ⬆️  Migration → serveur : ${key} (${safeLocalVal.length} entrées)`);
               } else {
                 // B2 — Local vide ou par défaut → ne rien pousser.
-                // Les vraies données arriveront via les actions utilisateur.
                 console.log(`[SI] ⏭️  ${key} : absent du serveur, local vide/défaut — en attente`);
               }
             }
@@ -1311,9 +1343,12 @@ export default function App() {
   const saveAppHabilitations = useCallback((v) => {
     setAppHabilitations(prev => {
       const resolved = typeof v === 'function' ? v(prev) : v;
-      try { _lsSet("gc-app-habilitations", JSON.stringify(resolved)); } catch (_) {}
-      // FIX v142 — Sync cross-machine : habilitations applicatives
-      dsSave("gc-app-habilitations", resolved).catch(() => {});
+      const resolvedJson = JSON.stringify(resolved);
+      try { _lsSet("gc-app-habilitations", resolvedJson); } catch (_) {}
+      // Éviter les écritures no-op qui déclenchent une boucle broadcast infinie
+      if (resolvedJson !== JSON.stringify(prev)) {
+        dsSave("gc-app-habilitations", resolved).catch(() => {});
+      }
       return resolved;
     });
   }, []);

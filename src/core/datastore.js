@@ -1076,6 +1076,38 @@ export async function dsGet(key, fallback = null) {
   return req;
 }
 
+// FIX-BATCH — Fetch plusieurs clés en un seul appel HTTP (POST /api/data/batch).
+// Remplace N appels dsGet individuels par 1 seule requête → élimine les rafales 429
+// et les 110+ erreurs 404 en console au démarrage.
+// Les clés non trouvées retournent null (pas de 404 par clé).
+// Les clés qui nécessitent une auth mais sont appelées sans JWT retournent null silencieusement.
+export async function dsBatchGet(keys) {
+  if (!_online || !Array.isArray(keys) || keys.length === 0) return {};
+  const sharedKeys = keys.filter(isSharedKey);
+  if (sharedKeys.length === 0) return {};
+  try {
+    const r = await fetch(`${getProxyUrl()}/api/data/batch`, {
+      method: 'POST',
+      headers: getRequestHeaders(),
+      body: JSON.stringify({ keys: sharedKeys }),
+      signal: AbortSignal.timeout(DS_GET_TIMEOUT_MS),
+    });
+    if (!r.ok) return {};
+    const json = await r.json();
+    const result = json.data || {};
+    // Mettre en cache toutes les valeurs reçues
+    const now = Date.now();
+    for (const [k, v] of Object.entries(result)) {
+      if (v !== null && v !== undefined) {
+        _cache.set(k, { data: v, ts: now });
+      }
+    }
+    return result;
+  } catch (_) {
+    return {};
+  }
+}
+
 // FIX v152 — 4e param options = {} : forceOverwrite:true bypasse l'anti-régression
 // pour les suppressions intentionnelles (dsDeleteItem, dsDeleteItemFromArray).
 export async function dsSave(key, value, userId = null, options = {}) {
