@@ -397,6 +397,9 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
       for(let c=c1+1;c<=c2;c++) vals.push(parseFloat(getDisplay(data[r]?.[c],r,c,data))||0);
       series.push(vals);
     }
+    // SEC-16 — Échapper les caractères HTML dans toutes les valeurs issues des cellules
+    // pour éviter un XSS stocké via les libellés/valeurs injectés dans le SVG.
+    const _svgEsc=(s)=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
     const colors=["#22C55E","#3B82F6","#F59E0B","#EF4444","#8B5CF6","#EC4899","#06B6D4","#F97316","#10B981","#A855F7"];
     const W=560,H=300,PAD=48,BOT=64,seriesCount=Math.max(...series.map(s=>s.length),1);
     const allVals=series.flatMap(s=>s).filter(v=>!isNaN(v));
@@ -422,7 +425,7 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
         const y0=yScale(0),yv=yScale(v);
         const y=Math.min(y0,yv),h=Math.abs(y0-yv);
         svgContent+=`<rect x="${x}" y="${y}" width="${bw}" height="${Math.max(h,1)}" fill="${colors[si%colors.length]}" rx="2" opacity="0.85">`;
-        svgContent+=`<title>${labels[i]}: ${v.toLocaleString("fr-FR")}</title></rect>`;
+        svgContent+=`<title>${_svgEsc(labels[i])}: ${v.toLocaleString("fr-FR")}</title></rect>`;
         if(h>14) svgContent+=`<text x="${x+bw/2}" y="${y+(v>=0?-3:h+9)}" text-anchor="middle" font-size="8" fill="${colors[si%colors.length]}" font-weight="700">${v>=1000?(v/1000).toFixed(1)+"k":v.toFixed(v<10&&v!==0?1:0)}</text>`;
       }));
     } else if(chartType==="line"){
@@ -430,11 +433,9 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
         const pts=series.map((s,i)=>s[si]!==undefined?`${PAD+i*xStep+xStep/2},${yScale(s[si])}`:null).filter(Boolean);
         if(pts.length>1){
           svgContent+=`<polyline points="${pts.join(" ")}" fill="none" stroke="${colors[si%colors.length]}" stroke-width="2.5" stroke-linejoin="round" opacity="0.9"/>`;
-          // Fill area
-          const areapts=pts.join(" ")+` ${PAD+(series.length-1)*xStep+xStep/2},${yScale(0)} ${PAD+xStep/2},${yScale(0)}`;
           svgContent+=`<polygon points="${pts[0].split(",")[0]},${yScale(0)} ${pts.join(" ")} ${pts[pts.length-1].split(",")[0]},${yScale(0)}" fill="${colors[si%colors.length]}" opacity="0.12"/>`;
         }
-        pts.forEach((pt,i)=>{const[px,py]=pt.split(",");svgContent+=`<circle cx="${px}" cy="${py}" r="4" fill="${colors[si%colors.length]}" stroke="#fff" stroke-width="1.5"><title>${labels[i]}: ${series[i]?.[si]?.toLocaleString("fr-FR")}</title></circle>`;});
+        pts.forEach((pt,i)=>{const[px,py]=pt.split(",");svgContent+=`<circle cx="${px}" cy="${py}" r="4" fill="${colors[si%colors.length]}" stroke="#fff" stroke-width="1.5"><title>${_svgEsc(labels[i])}: ${series[i]?.[si]?.toLocaleString("fr-FR")}</title></circle>`;});
       }
     } else if(chartType==="pie"||chartType==="donut"){
       const vals=series.map(s=>s[0]||0);
@@ -449,9 +450,9 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
         if(inner>0){
           const xi1=cx+inner*Math.cos(angle),yi1=cy+inner*Math.sin(angle);
           const xi2=cx+inner*Math.cos(angle+slice),yi2=cy+inner*Math.sin(angle+slice);
-          svgContent+=`<path d="M${x1},${y1} A${r},${r} 0 ${lg},1 ${x2},${y2} L${xi2},${yi2} A${inner},${inner} 0 ${lg},0 ${xi1},${yi1} Z" fill="${colors[i%colors.length]}" opacity="0.88" stroke="#1a1a2e" stroke-width="2"><title>${labels[i]}: ${v.toLocaleString("fr-FR")} (${(Math.abs(v)/total*100).toFixed(1)}%)</title></path>`;
+          svgContent+=`<path d="M${x1},${y1} A${r},${r} 0 ${lg},1 ${x2},${y2} L${xi2},${yi2} A${inner},${inner} 0 ${lg},0 ${xi1},${yi1} Z" fill="${colors[i%colors.length]}" opacity="0.88" stroke="#1a1a2e" stroke-width="2"><title>${_svgEsc(labels[i])}: ${v.toLocaleString("fr-FR")} (${(Math.abs(v)/total*100).toFixed(1)}%)</title></path>`;
         } else {
-          svgContent+=`<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${lg},1 ${x2},${y2} Z" fill="${colors[i%colors.length]}" opacity="0.88" stroke="#1a1a2e" stroke-width="2"><title>${labels[i]}: ${v.toLocaleString("fr-FR")} (${(Math.abs(v)/total*100).toFixed(1)}%)</title></path>`;
+          svgContent+=`<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${lg},1 ${x2},${y2} Z" fill="${colors[i%colors.length]}" opacity="0.88" stroke="#1a1a2e" stroke-width="2"><title>${_svgEsc(labels[i])}: ${v.toLocaleString("fr-FR")} (${(Math.abs(v)/total*100).toFixed(1)}%)</title></path>`;
         }
         if(slice>0.2) svgContent+=`<text x="${mx}" y="${my+3}" text-anchor="middle" font-size="9" fill="#fff" font-weight="800">${(Math.abs(v)/total*100).toFixed(0)}%</text>`;
         angle+=slice;
@@ -466,10 +467,10 @@ export function TableurPro({ T, currentUser, setNotifications=_noop, AppHeader=n
         }
       }
     }
-    // X labels
+    // X labels — SEC-16 : échapper les libellés issus des cellules (XSS stocké via SVG)
     labels.forEach((l,i)=>{
       const x=PAD+i*xStep+xStep/2;
-      axesSVG+=`<text x="${x}" y="${H-BOT+14}" text-anchor="middle" font-size="9" fill="#888">${String(l).slice(0,10)}</text>`;
+      axesSVG+=`<text x="${x}" y="${H-BOT+14}" text-anchor="middle" font-size="9" fill="#888">${_svgEsc(String(l).slice(0,10))}</text>`;
     });
     // Legend
     const legendY=H-18;
