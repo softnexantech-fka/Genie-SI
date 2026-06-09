@@ -289,7 +289,7 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
 
   // KYC — synchro avec gc-jur-kyc (JuridiqueApp)
   const [kycData, setKycDataRaw] = useState(()=>{try{return JSON.parse(_lsGet("gc-jur-kyc")||"[]");}catch(_){return [];}});
-  const saveKycData = React.useCallback(v => { setKycDataRaw(v); try{_lsSet("gc-jur-kyc",JSON.stringify(v)); dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err));}catch(_){} dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err)); }, []);
+  const saveKycData = React.useCallback(v => { setKycDataRaw(v); try{_lsSet("gc-jur-kyc",JSON.stringify(v));}catch(_){} dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err)); }, []);
 
   // Sync temps-réel : rafraîchit les données CRM quand un autre utilisateur les modifie
   useRemoteSync({
@@ -298,6 +298,38 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
     'gc-crm-relances':     setRelancesRaw,
     'gc-jur-kyc':          setKycDataRaw,
   });
+
+  // FIX v155 — Hydratation initiale depuis le serveur au montage du composant.
+  // Les états sont initialisés depuis localStorage (qui peut être vide sur une machine fraîche).
+  // useRemoteSync ne couvre que les broadcasts temps-réel, pas le chargement initial.
+  // Ce useEffect comble le gap : si les données locales sont vides, on fetch le serveur.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { dsGet } = await import('../../core/datastore.js');
+        const [rel, inter, opps, kyc] = await Promise.all([
+          dsGet('gc-crm-relances', null),
+          dsGet('gc-crm-interactions', null),
+          dsGet('gc-crm-opps', null),
+          dsGet('gc-jur-kyc', null),
+        ]);
+        if (cancelled) return;
+        if (Array.isArray(rel)   && rel.length   > 0) { setRelancesRaw(rel);     try { _lsSet("gc-crm-relances",     JSON.stringify(rel));     } catch (_) {} }
+        if (Array.isArray(inter) && inter.length > 0) { setInteractionsRaw(inter); try { _lsSet("gc-crm-interactions", JSON.stringify(inter)); } catch (_) {} }
+        if (Array.isArray(opps)  && opps.length  > 0) { setOppsRaw(opps);         try { _lsSet("gc-crm-opps",         JSON.stringify(opps));   } catch (_) {} }
+        if (Array.isArray(kyc)   && kyc.length   > 0) { setKycDataRaw(kyc);       try { _lsSet("gc-jur-kyc",          JSON.stringify(kyc));    } catch (_) {} }
+        // Docs unifiés : mettre à jour si le serveur a plus d'éléments que le local
+        const serverDocs = await dsGet('gc-docs-unified', null);
+        if (!cancelled && Array.isArray(serverDocs) && serverDocs.length > docs.length) {
+          setDocs(serverDocs);
+          try { _lsSet("gc-docs-unified", JSON.stringify(serverDocs)); } catch (_) {}
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── CRM — États UI ───────────────────────────────────────────────────────
   const [crmTab, setCrmTab] = useState("portefeuille");

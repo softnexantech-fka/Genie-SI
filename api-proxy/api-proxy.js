@@ -471,6 +471,13 @@ const MAX_DB_GB      = parseInt(process.env.MAX_DB_GB   || '250');
 const MAX_VALUE_MB   = parseInt(process.env.MAX_VALUE_MB || '10');
 const LOCAL_NETWORK_ORIGIN = /^https?:\/\/((localhost|127\.0\.0\.1)|(192\.168\.\d+\.\d+)|(10\.\d+\.\d+\.\d+)|(172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+))(?::\d+)?$/;
 
+// Avertissement si les secrets n'ont pas été changés depuis les valeurs par défaut
+if (API_SECRET.includes('change-me-in-env') || JWT_SECRET.includes('change-me-in-env')) {
+  console.warn('\n⚠️  [SÉCURITÉ] Les secrets JWT_SECRET / API_SECRET utilisent les valeurs par défaut.');
+  console.warn('   Créez api-proxy/.env avec des clés aléatoires avant de mettre en production.');
+  console.warn('   Exécutez : node api-proxy/generate-jwt-secret.js\n');
+}
+
 // FIX SYNC-S2 — Logger sécurisé : filtre les tokens JWT et mots de passe des logs.
 // Évite qu'un token expiré ou invalide dans un header soit loggué en clair.
 const _sanitizeForLog = (msg) => {
