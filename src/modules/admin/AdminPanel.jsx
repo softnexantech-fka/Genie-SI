@@ -200,7 +200,7 @@ export function AdminPanel({ T, addSessionLog, dossiers=[], generateAccessCode, 
       { id:"messages",    label:"✉️ Messagerie",        keys:["gc-messages","gc-messages-global","gc-msg-drafts","gc-memos"] },
       { id:"sessionLogs", label:"🔐 Journaux session",  keys:[], stateKey:"sessionLogs" },
     ];
-    const [backupModules, setBackupModules] = useState({ users:true, dossiers:true, taches:true, rdvs:true, partners:true, approvals:true, finance:true, sirh:true, docs:false, audit:false, logistique:false, comm:false, messages:false, sessionLogs:false });
+    const [backupModules, setBackupModules] = useState({ users:true, dossiers:true, taches:true, rdvs:true, partners:true, approvals:true, finance:true, sirh:true, docs:true, audit:true, logistique:true, comm:false, messages:false, sessionLogs:false });
     // autoBackupEnabled / autoBackupInterval : gérés par AppRoot (hydratés depuis serveur)
     const autoBackupEnabled = autoBackupEnabledProp !== undefined ? autoBackupEnabledProp : true;
     const setAutoBackupEnabled = (v) => { _lsSet("gc-auto-backup-enabled", JSON.stringify(v)); dsSave("gc-auto-backup-enabled", v).catch(()=>{}); setAutoBackupEnabledProp(v); };

@@ -1062,11 +1062,19 @@ export function SIApp(props) {
     const now = new Date().toISOString();
     const snap = {
       id: `BCK-${Date.now()}`, at: now, by: u.name, byId: u.id, trigger: triggeredBy,
-      counts: { users: users.length, dossiers: dossiers.length, taches: taches.length, rdvs: rdvs.length },
+      counts: { users: users.length, dossiers: dossiers.length, taches: taches.length, rdvs: rdvs.length, factures: (() => { try { return JSON.parse(_lsGet("gc-factures")||"[]").length; } catch(_){ return 0; } })() },
     };
     try {
       const all = JSON.parse(_lsGet("gc-backups")||"[]");
-      _lsSet("gc-backups", JSON.stringify([{...snap, data:{ users:lsLoad("users",[]), dossiers:lsLoad("dossiers",[]), taches:lsLoad("taches",[]), rdvs:lsLoad("rdvs",[]), partners:lsLoad("partners",[]), sessionLogs:(sessionLogs||[]).slice(0,100) }}, ...all].slice(0,10)));
+      const _lsParse = (k) => { try { const r = _lsGet(k); return r ? JSON.parse(r) : []; } catch(_){ return []; } };
+      const _stripB64 = (arr) => Array.isArray(arr) ? arr.map(({dataUrl,fileData,base64,content,...r})=>r) : [];
+      _lsSet("gc-backups", JSON.stringify([{...snap, data:{
+        users:lsLoad("users",[]), dossiers:lsLoad("dossiers",[]), taches:lsLoad("taches",[]), rdvs:lsLoad("rdvs",[]), partners:lsLoad("partners",[]), sessionLogs:(sessionLogs||[]).slice(0,100),
+        dossierFiles:_stripB64(_lsParse("gc-dossier-files")), standaloneDocs:_lsParse("gc-standalone-docs"), docsUnified:_lsParse("gc-docs-unified"), internalDocs:_lsParse("gc-internal-docs"), externalDocs:_lsParse("gc-external-docs"),
+        factures:_lsParse("gc-factures"), budget:_lsParse("gc-budget"), risks:_lsParse("gc-risks"), auditChecklist:_lsParse("gc-audit-checklist"),
+        crmRelances:_lsParse("gc-crm-relances"), crmInteractions:_lsParse("gc-crm-interactions"), crmOpps:_lsParse("gc-crm-opps"),
+        jurKyc:_lsParse("gc-jur-kyc"), jurDocs:_lsParse("gc-jur-docs"),
+      }}, ...all].slice(0,10)));
       setBackupLog(prev => {
         const logUpdated = [{id:snap.id,at:now,by:u.name,trigger:triggeredBy,counts:snap.counts},...prev].slice(0,50);
         try { _lsSet("gc-backup-log", JSON.stringify(logUpdated)); } catch (_) {}
