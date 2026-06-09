@@ -471,6 +471,13 @@ const MAX_DB_GB      = parseInt(process.env.MAX_DB_GB   || '250');
 const MAX_VALUE_MB   = parseInt(process.env.MAX_VALUE_MB || '10');
 const LOCAL_NETWORK_ORIGIN = /^https?:\/\/((localhost|127\.0\.0\.1)|(192\.168\.\d+\.\d+)|(10\.\d+\.\d+\.\d+)|(172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+))(?::\d+)?$/;
 
+// Avertissement si les secrets n'ont pas été changés depuis les valeurs par défaut
+if (API_SECRET.includes('change-me-in-env') || JWT_SECRET.includes('change-me-in-env')) {
+  console.warn('\n⚠️  [SÉCURITÉ] Les secrets JWT_SECRET / API_SECRET utilisent les valeurs par défaut.');
+  console.warn('   Créez api-proxy/.env avec des clés aléatoires avant de mettre en production.');
+  console.warn('   Exécutez : node api-proxy/generate-jwt-secret.js\n');
+}
+
 // FIX SYNC-S2 — Logger sécurisé : filtre les tokens JWT et mots de passe des logs.
 // Évite qu'un token expiré ou invalide dans un header soit loggué en clair.
 const _sanitizeForLog = (msg) => {
@@ -717,6 +724,8 @@ function addColumnIfMissing(table, column, definition) {
 function ensureSiFilesColumns() {
   addColumnIfMissing('si_files', 'compressed', 'INTEGER DEFAULT 0');
   addColumnIfMissing('si_files', 'compressed_path', 'TEXT DEFAULT NULL');
+  // FIX BUG-FILE-ACCESS : Ajout colonne access_level pour contrôle d'accès par niveau
+  addColumnIfMissing('si_files', 'access_level', 'INTEGER DEFAULT 1');
 }
 
 async function createTablesAsync() {
@@ -1172,15 +1181,28 @@ io.on('connection', (socket) => {
     const batch = items.slice(0, 200);
     let synced = 0;
 
+    // FIX-FLUSH-TOMB : Charger les tombstones UNE FOIS avant la boucle de flush.
+    // Sans ce filtre, la file offline rejouait des snapshots antérieurs à une suppression,
+    // ressuscitant des éléments déjà supprimés par d'autres postes ou d'autres onglets.
+    let flushTombstones = {};
+    try { flushTombstones = (await dbGet('gc-tombstones')) || {}; } catch (_) {}
+    const _filterByTombstones = (key, value) => {
+      if (!Array.isArray(value)) return value;
+      const ids = new Set((flushTombstones[key] || []).map(String));
+      if (ids.size === 0) return value;
+      return value.filter(item => !item?.id || !ids.has(String(item.id)));
+    };
+
     const doFlush = async () => {
       for (const item of batch) {
         if (!item?.key || !isAllowedKey(item.key)) continue;
         if (item.value === undefined || item.value === null) continue;
         const validated = validateAndSanitizeValue(item.key, item.value);
         if (!validated.valid) continue;
-        const valJson = JSON.stringify(validated.sanitized);
+        const filtered = _filterByTombstones(item.key, validated.sanitized);
+        const valJson = JSON.stringify(filtered);
         if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
-        const ok = await dbSet(item.key, validated.sanitized, verifiedUserId);
+        const ok = await dbSet(item.key, filtered, verifiedUserId);
         if (ok) {
           synced++;
           broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now() }, socket.id);
@@ -1196,7 +1218,9 @@ io.on('connection', (socket) => {
             if (item.value === undefined || item.value === null) continue;
             const vr = validateAndSanitizeValue(item.key, item.value);
             if (!vr.valid) continue;
-            const val = JSON.stringify(vr.sanitized);
+            // FIX-FLUSH-TOMB : filtrer par tombstones dans la transaction synchrone aussi
+            const filtered = _filterByTombstones(item.key, vr.sanitized);
+            const val = JSON.stringify(filtered);
             if (Buffer.byteLength(val, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
             const ts = Math.floor(Date.now() / 1000);
             db.prepare(
@@ -1592,7 +1616,42 @@ app.post('/api/data/batch', rateLimiter(120), authenticateToken, async (req, res
   res.json({ ok: true, data: result });
 });
 
-app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (req, res) => {
+// FIX BUG-LVL1 — Filtre les données métier (dossiers, taches, rdvs) par appartenance
+// pour les utilisateurs de niveau <= 3. Les niveaux 1-3 ne voient que leurs propres
+// dossiers/tâches (createdBy, assignedTo, collaborators). Les niveaux 4+ voient tout.
+// Les champs sensibles (passwordHash, etc.) sont retirés pour les non-admins.
+function applyLevelFilter(key, value, user) {
+  if (!Array.isArray(value)) return value;
+  const userLevel = user?.level || 0;
+  const userId    = user?.id;
+  const isAdmin   = user?.isAdmin || userLevel >= 6;
+
+  // Clés utilisateurs : retirer les champs sensibles pour les non-admins
+  if (key === 'users' || key === 'gc-users') {
+    if (isAdmin) return value;
+    return value.map(u => {
+      const { passwordHash, password, passwordHistory, pin, ...safe } = u;
+      return safe;
+    });
+  }
+
+  // Clés métier : filtrer par ownership pour niveaux <= 3
+  const OWNERSHIP_FILTERED_KEYS = new Set(['dossiers','gc-dossiers','taches','gc-taches','rdvs','gc-rdvs']);
+  if (OWNERSHIP_FILTERED_KEYS.has(key) && !isAdmin && userLevel <= 3 && userId) {
+    return value.filter(item => {
+      if (!item) return false;
+      if (item.createdBy === userId) return true;
+      if (item.assignedTo === userId) return true;
+      if (item.responsable === userId) return true;
+      if (Array.isArray(item.collaborators) && item.collaborators.includes(userId)) return true;
+      if (Array.isArray(item.assignees) && item.assignees.includes(userId)) return true;
+      return false;
+    });
+  }
+  return value;
+}
+
+app.get('/api/data/:key', rateLimiter(800), authenticateTokenOptional, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
@@ -1600,7 +1659,11 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
     // Use Redis cache for hot keys when available
     if (redisAvailable && CACHEABLE_KEYS.has(key)) {
       const cached = await redisGetCache(key);
-      if (cached !== null) return res.json({ ok: true, key, value: cached, source: 'redis' });
+      // Appliquer le filtre niveau même sur les données en cache Redis
+      if (cached !== null) {
+        const filtered = applyLevelFilter(key, cached, req.user);
+        return res.json({ ok: true, key, value: filtered, source: 'redis' });
+      }
     }
 
     if (dbReady) {
@@ -1613,14 +1676,18 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
       if (meta === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
       const { value, updatedAt } = meta;
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
-      return res.json({ ok: true, key, value, updatedAt });
+      // FIX BUG-LVL1 : Appliquer le filtrage par niveau avant de retourner
+      const filteredValue = applyLevelFilter(key, value, req.user);
+      return res.json({ ok: true, key, value: filteredValue, updatedAt });
     }
 
     const data = jsonLoad();
     if (!(key in data)) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
     const v = data[key];
     if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, v);
-    return res.json({ ok: true, key, value: v });
+    // FIX BUG-LVL1 : Appliquer le filtrage par niveau avant de retourner
+    const filteredV = applyLevelFilter(key, v, req.user);
+    return res.json({ ok: true, key, value: filteredV });
   } catch (e) {
     console.error('[GET /api/data/:key] error', e && e.message);
     return res.status(500).json({ error: 'Erreur interne' });
@@ -1628,7 +1695,7 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
 });
 
 // [C7][C8] Écriture clé-valeur — limite taille + broadcast sans l'émetteur
-app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res) => {
+app.post('/api/data/:key', rateLimiter(800), authenticateToken, async (req, res) => {
   const key = req.params.key;
   const { value } = req.body;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
@@ -1738,6 +1805,18 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     return res.status(413).json({ error: `Valeur trop grande (max ${MAX_VALUE_MB} MB)` });
   }
 
+  // [DEDUP] Si la valeur entrante est identique à la valeur stockée → pas d'écriture, pas de broadcast.
+  // Ceci casse la boucle infinie POST→broadcast→GET→POST sur les clés comme gc-app-habilitations.
+  // Skip uniquement si le client n'a pas positionné x-force-overwrite.
+  if (!req.headers['x-force-overwrite'] && dbReady) {
+    try {
+      const currentRaw = await dbGet(key);
+      if (JSON.stringify(currentRaw) === valJson) {
+        return res.status(200).json({ ok: true, noop: true });
+      }
+    } catch (_) {}
+  }
+
   if (dbReady) {
     const ok = await dbSet(key, writeValue, req.user?.id || 'anonymous');
     if (!ok) return res.status(500).json({ error: 'Erreur base de données' });
@@ -1829,7 +1908,7 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
 });
 
 // GET history for a key (audit entries)
-app.get('/api/data/:key/history', rateLimiter(60), authenticateToken, async (req, res) => {
+app.get('/api/data/:key/history', rateLimiter(200), authenticateToken, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if ((req.user?.level || 0) < 2) return res.status(403).json({ error: 'Niveau 2 minimum requis pour consulter l’historique' });
@@ -1841,11 +1920,25 @@ app.get('/api/data/:key/history', rateLimiter(60), authenticateToken, async (req
   } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 
-// [C9] DELETE — vérification isAllowedKey manquante ajoutée
-app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, res) => {
+// [C9] DELETE — vérification isAllowedKey + garde niveau pour clés métier
+app.delete('/api/data/:key', rateLimiter(200), authenticateToken, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
+  // FIX BUG-DEL1 — Les clés métier (dossiers, taches, rdvs, etc.) ne peuvent être supprimées
+  // en intégralité que par un niveau 5+ ou admin. Évite qu'un niveau 1 vide toute la base.
+  const BUSINESS_FULL_DELETE_LEVEL = new Set([
+    'dossiers','gc-dossiers','taches','gc-taches','rdvs','gc-rdvs',
+    'partners','gc-partners','gc-dossier-files','gc-files','gc-docs-unified',
+    'gc-messages','gc-notifications',
+  ]);
+  if (BUSINESS_FULL_DELETE_LEVEL.has(key)) {
+    const lvl = req.user?.level || 0;
+    if (!req.user?.isAdmin && lvl < 5) {
+      await auditLog(req.user?.id || 'anon', 'DELETE_DENIED', key, 'Niveau 5+ requis pour suppression totale', req.ip);
+      return res.status(403).json({ error: 'Niveau 5+ requis pour supprimer une clé métier complète' });
+    }
+  }
   const userId = req.body?.userId || req.user?.id || 'anonymous';
   if (dbReady) {
     await dbDelete(key);
@@ -1859,11 +1952,32 @@ app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, re
 // FIX v152 — DELETE /api/data/:key/item/:itemId
 // Suppression chirurgicale d'un seul élément avec enregistrement tombstone.
 // Garantit que l'anti-régression ne ressuscitera jamais cet item même après re-sync.
-app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, async (req, res) => {
+app.delete('/api/data/:key/item/:itemId', rateLimiter(200), authenticateToken, async (req, res) => {
   const { key, itemId } = req.params;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
   if (!itemId) return res.status(400).json({ error: 'itemId requis' });
+
+  // FIX BUG-DEL2 — Vérification de propriété pour suppression d'item : un utilisateur
+  // de niveau 1-2 ne peut supprimer que ses propres items (createdBy ou assignedTo).
+  // Les niveaux 3+ et admins peuvent supprimer n'importe quel item.
+  const requestorLevel = req.user?.level || 0;
+  const requestorId = req.user?.id;
+  if (requestorLevel < 3 && !req.user?.isAdmin && requestorId) {
+    try {
+      const currentForCheck = dbReady ? await dbGet(key) : null;
+      if (Array.isArray(currentForCheck)) {
+        const targetItem = currentForCheck.find(i => i?.id && String(i.id) === String(itemId));
+        if (targetItem) {
+          const isOwner = targetItem.createdBy === requestorId || targetItem.assignedTo === requestorId || targetItem.responsable === requestorId;
+          if (!isOwner) {
+            await auditLog(requestorId, 'DELETE_ITEM_DENIED', key, `Item ${itemId} non-propriétaire`, req.ip);
+            return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres éléments' });
+          }
+        }
+      }
+    } catch (_) {}
+  }
 
   // 1. Enregistrer le tombstone AVANT toute modification
   try {
@@ -1907,7 +2021,7 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
   }),
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
-    const { dossierId, module: mod = 'general', uploadedBy } = req.body;
+    const { dossierId, module: mod = 'general', uploadedBy, accessLevel } = req.body;
     const fileId  = `F-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const hash    = crypto.createHash('md5');
     const stream  = fs.createReadStream(req.file.path);
@@ -1915,6 +2029,8 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
     const checksum = hash.digest('hex');
     // Tracer l'uploader : priorité body.uploadedBy, puis user authentifié, puis 'anonymous'
     const uploaderId = uploadedBy || req.user?.id || 'anonymous';
+    // FIX BUG-FILE-ACCESS : access_level envoyé par le client, clamped entre 1 et 6
+    const fileAccessLvl = Math.min(6, Math.max(1, parseInt(accessLevel || '1', 10) || 1));
     const { compressed, diskPath, compressedPath } = await compressIfNeeded(req.file.path, req.file.mimetype, req.file.size);
     const meta = {
       id: fileId, filename: req.file.filename, original_name: req.file.originalname,
@@ -1925,6 +2041,7 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
       compressed: compressed ? 1 : 0,
       compressed_path: compressedPath,
       checksum,
+      access_level: fileAccessLvl,
     };
     // Malware scan (if clamscan available)
     try {
@@ -1941,8 +2058,8 @@ app.post('/api/files/upload', rateLimiter(10, 60_000), authenticateTokenOptional
       return res.status(503).json({ ok: false, error: 'Base de données indisponible pour l\'upload du fichier' });
     }
     try {
-      const sql = `INSERT INTO si_files(id,filename,original_name,mime_type,size_bytes,dossier_id,module,uploaded_by,disk_path,compressed,compressed_path,checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`;
-      const params = [meta.id, meta.filename, meta.original_name, meta.mime_type, meta.size_bytes, meta.dossier_id, meta.module, meta.uploaded_by, meta.disk_path, meta.compressed, meta.compressed_path, meta.checksum];
+      const sql = `INSERT INTO si_files(id,filename,original_name,mime_type,size_bytes,dossier_id,module,uploaded_by,disk_path,compressed,compressed_path,checksum,access_level) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+      const params = [meta.id, meta.filename, meta.original_name, meta.mime_type, meta.size_bytes, meta.dossier_id, meta.module, meta.uploaded_by, meta.disk_path, meta.compressed, meta.compressed_path, meta.checksum, meta.access_level];
       if (dbMode === 'sqlite3') await runAsync(sql, params);
       else db.prepare(sql).run(...params);
       // Insert file version snapshot for versioning/history
@@ -2147,6 +2264,17 @@ app.get('/api/files/:id', rateLimiter(300), authenticateTokenOptional, async (re
     return res.status(500).json({ error: 'Erreur base de données' });
   }
   if (!meta) return res.status(404).json({ error: 'Fichier introuvable' });
+
+  // FIX BUG-FILE-ACCESS — Vérification du niveau d'accès avant d'envoyer le fichier.
+  // Sans ce garde, n'importe qui (même anonyme) pouvait télécharger des fichiers
+  // marqués confidentiels (access_level élevé) en connaissant simplement leur ID.
+  const fileAccessLevel = meta.access_level || 1;
+  const userLevel = req.user?.level || 0;
+  const isAdminUser = req.user?.isAdmin || userLevel >= 6;
+  if (userLevel < fileAccessLevel && !isAdminUser) {
+    await auditLog(req.user?.id || 'anonymous', 'FILE_ACCESS_DENIED', id, `Niv. ${fileAccessLevel} requis, utilisateur niv. ${userLevel}`, req.ip);
+    return res.status(403).json({ error: `Habilitation insuffisante — niveau ${fileAccessLevel}+ requis pour ce fichier` });
+  }
 
   // Validation anti-path-traversal : le chemin absolu doit rester dans UPLOADS_DIR
   const realPath = path.resolve(meta.disk_path || meta.compressed_path || '');
@@ -2877,8 +3005,14 @@ async function start() {
       const validIds = new Set(allUsers.map(u => u.id));
       synced = synced.filter(g => validIds.has(g.id));
     }
-    await dbSet('gc-users', synced);
-    console.log(`[BOOT-SYNC] gc-users synchronisé : ${synced.length} comptes (+${added} ajoutés, ${updated} MàJ)`);
+    // FIX-BOOT-UNCOND : N'écrire gc-users que si quelque chose a réellement changé.
+    // L'écriture inconditionnelle précédente déclenchait un broadcast inutile à chaque démarrage.
+    if (added > 0 || updated > 0 || synced.length !== gcUsers.length) {
+      await dbSet('gc-users', synced);
+      console.log(`[BOOT-SYNC] gc-users synchronisé : ${synced.length} comptes (+${added} ajoutés, ${updated} MàJ)`);
+    } else {
+      console.log(`[BOOT-SYNC] gc-users déjà à jour : ${synced.length} comptes (aucune écriture)`);
+    }
   } catch(e) { console.warn('[BOOT-SYNC] Échec:', e.message); };
 
   // [C4] Checkpoint WAL périodique (toutes les 5 min) pour éviter croissance WAL
@@ -2935,50 +3069,16 @@ async function start() {
   };
   setInterval(_scheduleTombstonePurge, 60 * 60 * 1000); // vérification horaire
 
-  // TASK1 — Backup SQLite journalier : immédiat au démarrage puis toutes les 24h
-  try { await runBackup(); } catch (_) {}
-  setInterval(async () => {
+  // FIX-BOOT-DEDUP : Backup différé de 30s après le démarrage (évite une écriture disque lourde
+  // pendant l'initialisation). Le backup 6h (l.2991) couvre les runs suivants.
+  setTimeout(async () => {
     try { await runBackup(); } catch (_) {}
-  }, 24 * 60 * 60 * 1000);
+  }, 30_000);
+  // NOTE : le setInterval 24h a été supprimé — le backup auto 6h (createBackup, l.2991) suffit.
 
-  // [FIX-BOOT] Bootstrap gc-users depuis 'users' si des comptes manquent (premier démarrage)
-  try {
-    // [FIX-WAL] Forcer checkpoint WAL avant lecture pour éviter données obsolètes
-    if (dbMode === 'better-sqlite3') {
-      db.pragma('wal_checkpoint(FULL)');
-    } else if (dbMode === 'sqlite3') {
-      await runAsync('PRAGMA wal_checkpoint(FULL)');
-    }
-    const gcUsers   = await dbGet('gc-users') || [];
-    const allUsers  = await dbGet('users')    || [];
-    if (Array.isArray(allUsers) && allUsers.length > 0) {
-      let changed = false;
-      for (const u of allUsers) {
-        const exists = gcUsers.some(g => g.id === u.id || g.username === u.alias || g.email === u.email);
-        if (!exists && (u.passwordHash || u.password)) {
-          gcUsers.push({
-            id:            u.id,
-            username:      u.alias || u.id,
-            email:         u.email || '',
-            passwordHash:  u.passwordHash || '',
-            role:          u.role || 'Collaborateur',
-            level:         u.level ?? 1,
-            accountStatus: u.accountStatus || 'ACTIF',
-          });
-          changed = true;
-          console.log(`[BOOT] Compte '${u.alias || u.id}' ajouté à gc-users depuis users`);
-        }
-        // [FIX-AUTH-ID] Corriger l'ID "admin" → vrai ID du compte dans 'users'
-        const gcEntry = gcUsers.find(g => g.id === 'admin' && (g.username === u.alias || g.email === u.email));
-        if (gcEntry && u.id && gcEntry.id !== u.id) {
-          console.log(`[BOOT] Correction ID gc-users : "${gcEntry.id}" → "${u.id}" pour ${gcEntry.username}`);
-          gcEntry.id = u.id;
-          changed = true;
-        }
-      }
-      if (changed) await dbSet('gc-users', gcUsers);
-    }
-  } catch (e) { console.warn('[BOOT] Bootstrap gc-users partiel:', e.message); }
+  // FIX-BOOT-DEDUP : Le second bloc [FIX-BOOT] bootstrap gc-users (anciennement ici) a été
+  // fusionné dans le premier bloc [BOOT-SYNC] ci-dessus qui est plus complet et évite le
+  // wal_checkpoint(FULL) coûteux au démarrage ainsi que la double écriture gc-users.
 
   // [FIX-EADDRINUSE] Gestion propre du port déjà utilisé
   server.on('error', (err) => {

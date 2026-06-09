@@ -337,12 +337,30 @@ export function SIApp(props) {
       // FIX v129 — Sync réseau manquante : les nouveaux documents créés dans
       // GestionDocsUnifiee n'étaient pas propagés aux autres postes.
       if (!isDemoMode) {
-        const standalonePayload = resolved.slice(0, 300).map(d => ({ ...d, url: undefined, _src: "standalone" }));
-        dsSave('gc-standalone-docs', standalonePayload).catch(() => {});
+        const forSync = resolved.slice(0, 300).map(d => ({
+          ...d, dataUrl: null, blob: undefined,
+          url: d.serverUrl || d.url || null, _src: "standalone",
+        }));
+        dsSave('gc-standalone-docs', forSync).catch(() => {});
+        dsSave('gc-docs-unified',    forSync).catch(() => {});
       }
       return resolved;
     });
   }, [isDemoMode]);
+
+  // FIX v155 — Propagation siSystemDocs → docs
+  // AppRoot hydrate siSystemDocs depuis le serveur (gc-docs-unified / gc-si-docs) mais
+  // docs est un state local initialisé uniquement depuis localStorage.
+  // Sans ce useEffect, une machine fraîche (LS vide) ne voit jamais les docs existants
+  // même si AppRoot les a bien récupérés du serveur.
+  useEffect(() => {
+    if (!Array.isArray(siSystemDocs) || siSystemDocs.length === 0) return;
+    setDocsRaw(prev => {
+      if (prev.length >= siSystemDocs.length) return prev; // local déjà aussi complet ou plus
+      try { _lsSet("gc-docs-unified", JSON.stringify(siSystemDocs)); } catch (_) {}
+      return siSystemDocs;
+    });
+  }, [siSystemDocs]);
 
   const [committees, setCommitteesRaw] = useState(() => {
     try { const s = _lsGet('gc-committees'); return s ? JSON.parse(s) : INITIAL_COMMITTEES; } catch(_) { return INITIAL_COMMITTEES; }
@@ -760,14 +778,25 @@ export function SIApp(props) {
             }).catch(() => {});
           }).catch(() => {});
         }
-        if (key === 'gc-standalone-docs' || key === 'gc-docs-unified') {
+        if (key === 'gc-standalone-docs') {
           // Recharger les documents standalone depuis le serveur
           import('./core/datastore.js').then(({ dsGet }) => {
             dsGet('gc-standalone-docs', []).then(val => {
               if (val && Array.isArray(val)) {
                 setStandaloneDocumentsRaw(val);
-                setDocsRaw(val);
                 try { _lsSet("gc-standalone-docs", JSON.stringify(val)); } catch (_) {}
+              }
+            }).catch(() => {});
+          }).catch(() => {});
+        }
+        // FIX v155 — gc-docs-unified / gc-si-docs : fetcher la bonne clé (pas gc-standalone-docs)
+        // Avant ce fix, les docs créés sur une autre machine n'apparaissaient jamais
+        // car on rechargait gc-standalone-docs (vide) au lieu de gc-docs-unified.
+        if (key === 'gc-docs-unified' || key === 'gc-si-docs') {
+          import('./core/datastore.js').then(({ dsGet }) => {
+            dsGet('gc-docs-unified', []).then(val => {
+              if (val && Array.isArray(val) && val.length > 0) {
+                setDocsRaw(val);
                 try { _lsSet("gc-docs-unified", JSON.stringify(val)); } catch (_) {}
               }
             }).catch(() => {});
@@ -1571,12 +1600,12 @@ export function SIApp(props) {
       { id:"taches",        icon:"📋", label:"Tâches & Alertes",           minLevel:1,
         rawCount: tacheGreen + tacheRed,
         countGreen: tacheGreen, countRed: tacheRed },
-      // Rapport d'activité entre Tâches et Demandes — niv2+
+      { id:"agenda",        icon:"📅", label:"Agenda & RDV",               minLevel:1 },
+      // Rapport d'activité après Agenda — niv2+
       ...((lvl >= 2) ? [{ id:"rapport_activite", icon:"📄", label:"Rapport d'Activité", minLevel:2 }] : []),
       { id:"demandes",      icon:"📨", label:"Mes Demandes",               minLevel:1,
         rawCount: demGreen + demRed,
         countGreen: demGreen, countRed: demRed },
-      { id:"agenda",        icon:"📅", label:"Agenda & RDV",               minLevel:1 },
       { id:"codification",  icon:"🏷️", label:"Codification & Refs",        minLevel:1 },
       { id:"archivage",     icon:"🗂️", label:"Archivage",                  minLevel:1 },
       { id:"processus",     icon:"🗺️", label:"Processus & Hiérarchie",     minLevel:1 },

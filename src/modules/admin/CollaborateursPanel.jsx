@@ -63,12 +63,20 @@ export function CollaborateursPanel({ users=[], setUsers=_noop, currentUser, pen
       return online;
     };
 
-    // Marquer l'utilisateur courant + rafraîchir la vue
+    // Marquer l'utilisateur courant + rafraîchir la vue + écrire au serveur pour cross-machine
     const markOnline = async () => {
       window.__gcOnlineUsers.set(currentUser.id, Date.now());
       // Lire la présence serveur pour cross-machine accuracy
       let serverPresence = null;
       try { serverPresence = await dsGet('gc-presence', null); } catch (_) {}
+      // FIX BUG-PRESENCE-1 : Écrire le heartbeat AU serveur pour que les autres machines
+      // voient cet utilisateur "en ligne". Avant ce fix, seul window.__gcOnlineUsers était mis
+      // à jour — invisible pour toute autre machine ou session.
+      try {
+        const updatedPresence = { ...(serverPresence && typeof serverPresence === 'object' ? serverPresence : {}), [currentUser.id]: Date.now() };
+        await dsSave('gc-presence', updatedPresence, currentUser.id);
+        serverPresence = updatedPresence;
+      } catch (_) {}
       setOnlineUsers(computeOnline(serverPresence));
     };
 
@@ -76,8 +84,12 @@ export function CollaborateursPanel({ users=[], setUsers=_noop, currentUser, pen
     const interval = setInterval(markOnline, 20000); // heartbeat toutes les 20s
 
     // FIX v142 — Souscrire aux changements SSE pour réactivité instantanée cross-machine
-    const unsub = dsOnSync(async (key) => {
-      if (key === 'gc-presence') {
+    // FIX BUG-SYNC-CB1 : dsOnSync passe un objet événement { key, action, by, ts }
+    // et non une chaîne. L'ancienne comparaison `if (key === 'gc-presence')` était
+    // TOUJOURS false car `key` était l'objet entier, jamais la chaîne.
+    const unsub = dsOnSync(async (evt) => {
+      const evtKey = evt?.key || evt;
+      if (evtKey === 'gc-presence' || evtKey === '__heartbeat__') {
         let serverPresence = null;
         try { serverPresence = await dsGet('gc-presence', null); } catch (_) {}
         // Sync vers localStorage pour cohérence
