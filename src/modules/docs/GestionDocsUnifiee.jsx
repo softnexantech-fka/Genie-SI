@@ -292,11 +292,14 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const saveKycData = React.useCallback(v => { setKycDataRaw(v); try{_lsSet("gc-jur-kyc",JSON.stringify(v)); dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err));}catch(_){} dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err)); }, []);
 
   // Sync temps-réel : rafraîchit les données CRM quand un autre utilisateur les modifie
+  // FIX v156 — Ajout de 'partners' et 'gc-crm-clients' pour sync temps réel CRM cross-machine
   useRemoteSync({
     'gc-crm-interactions': setInteractionsRaw,
     'gc-crm-opps':         setOppsRaw,
     'gc-crm-relances':     setRelancesRaw,
     'gc-jur-kyc':          setKycDataRaw,
+    'partners':  (v) => { if (Array.isArray(v) && v.length > 0) setPartnersSync(v); },
+    'gc-crm-clients': (v) => { if (Array.isArray(v) && v.length > 0) setPartnersSync(v); },
   });
 
   // ── CRM — États UI ───────────────────────────────────────────────────────

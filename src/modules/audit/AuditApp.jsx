@@ -6,7 +6,7 @@ import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, gcOpenPrintWindow } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
 
-export function AuditApp({ T, currentUser, setNotifications=_noop, setTaches=_noop, riskMatrix, setRiskMatrix=_noop, newRisk, setNewRisk=_noop, addRisk, auditTool, setAuditTool=_noop }){
+export function AuditApp({ T, currentUser, setNotifications=_noop, setTaches=_noop, dossiers=[], users=[], partners=[], rdvs=[], riskMatrix, setRiskMatrix=_noop, newRisk, setNewRisk=_noop, addRisk, auditTool, setAuditTool=_noop }){
   // ── Dialogues React (remplace window.alert/confirm/prompt) ────────
   const _dlg = useDialog();
   const gcAlert   = (msg, title, icon) => _dlg.alert(msg, title, icon);

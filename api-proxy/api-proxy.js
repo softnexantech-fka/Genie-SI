@@ -1738,6 +1738,17 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     return res.status(413).json({ error: `Valeur trop grande (max ${MAX_VALUE_MB} MB)` });
   }
 
+  // [DEDUP] Si la valeur entrante est identique à la valeur stockée → pas d'écriture, pas de broadcast.
+  // Coupe les boucles write→broadcast→GET→write qui créent des centaines de req/s (ex: gc-app-habilitations).
+  if (!req.headers['x-force-overwrite'] && dbReady) {
+    try {
+      const currentRaw = await dbGet(key);
+      if (JSON.stringify(currentRaw) === valJson) {
+        return res.status(200).json({ ok: true, noop: true });
+      }
+    } catch (_) {}
+  }
+
   if (dbReady) {
     const ok = await dbSet(key, writeValue, req.user?.id || 'anonymous');
     if (!ok) return res.status(500).json({ error: 'Erreur base de données' });

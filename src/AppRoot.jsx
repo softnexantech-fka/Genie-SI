@@ -933,12 +933,51 @@ export default function App() {
             }, []);
             break;
           }
+          // FIX v156 — Clés Finance / Audit / Logistique : écriture LS + CustomEvent
+          // BureauOffice n'a pas de state React dans AppRoot, on passe par LS + event custom.
+          case 'gc-journal': case 'gc-budget': case 'gc-factures': case 'gc-stocks':
+          case 'gc-risks': case 'gc-audit-checklist': case 'gc-audit-prog': case 'gc-tpa':
+          case 'gc-achats': case 'gc-logmod-stocks': case 'gc-inventaires': {
+            refreshServerValue(stateKey, (val) => {
+              try { _lsSet(stateKey, JSON.stringify(val)); } catch (_) {}
+              window.dispatchEvent(new CustomEvent('gc:data-sync', { detail: { key: stateKey, value: val } }));
+            }, []);
+            break;
+          }
           // FIX v129 — Actions comptes (suspensions, réactivations, créations par DG/Admin)
           case 'gc-account-actions': {
             refreshServerValue('gc-account-actions', (val) => {
               setPendingAccountActions(val);
               try { _lsSet('gc-account-actions', JSON.stringify(val)); } catch (_) {}
             }, []);
+            break;
+          }
+          // FIX v156 — Signal de réinitialisation totale émis par DG/Admin.
+          // Force un rechargement complet sur toutes les machines connectées.
+          case 'gc-factory-reset-signal': {
+            // Ne pas recharger la machine qui a initié le reset (elle se déconnecte elle-même)
+            if (evtKey === 'gc-factory-reset-signal' && evt?.by !== (currentUser?.id)) {
+              try {
+                // Vider tous les caches localStorage gc-* avant rechargement
+                Object.keys(localStorage)
+                  .filter(k => k.startsWith('gc-') || k.startsWith('GC_SI'))
+                  .forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+              } catch (_) {}
+              window.location.reload();
+            }
+            break;
+          }
+          // FIX v156 — Tombstones cross-machine : quand gc-tombstones est mis à jour
+          // (suppression depuis une autre machine), forcer le re-fetch des clés concernées
+          case 'gc-tombstones': {
+            import('./core/datastore.js').then(({ dsGet }) => {
+              dsGet('gc-tombstones', {}).then(tbs => {
+                if (tbs && typeof tbs === 'object') {
+                  try { _lsSet('gc-tombstones', JSON.stringify(tbs)); } catch (_) {}
+                  window.dispatchEvent(new CustomEvent('gc:tombstones-updated', { detail: tbs }));
+                }
+              }).catch(() => {});
+            }).catch(() => {});
             break;
           }
           default: break;
@@ -1631,9 +1670,37 @@ export default function App() {
              .forEach(k => { try { _lsRm(k); } catch(_) {} });
     } catch(_) {}
     // -- Collaborateurs externes (réinitialiser à la liste par défaut) --
-    setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS); dsSave("partners", INITIAL_PARTNERS);
-    // FIX v151 — Effacer les tombstones lors de la réinitialisation totale
+    setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS);
+    syncPromises.push(dsSave("partners", INITIAL_PARTNERS, null, { forceOverwrite: true }).catch(() => {}));
+
+    const extraResetKeys = [
+      'gc-journal', 'gc-budget', 'gc-stocks', 'gc-factures',
+      'gc-achats', 'gc-logmod-stocks', 'gc-inventaires', 'gc-inventaire-en-cours',
+      'gc-docs-unified', 'gc-si-docs', 'gc-standalone-docs',
+      'gc-crm-relances', 'gc-crm-interactions', 'gc-crm-opps', 'gc-crm-clients',
+      'gc-risks', 'gc-audit-checklist', 'gc-audit-prog', 'gc-tpa', 'gc-feuille-tests',
+      'gc-nc', 'gc-conffull-approvals', 'gc-conffull-checks',
+      'gc-jur-kyc', 'gc-jur-docs',
+      'gc-orgigram-nodes', 'gc-orgigram-links', 'gc-circuits',
+      'gc-committees', 'gc-codif-registry', 'gc-process-config',
+      'gc-messages-global', 'gc-presence', 'gc-tombstones',
+    ];
+    for (const k of extraResetKeys) {
+      try { _lsRm(k); } catch (_) {}
+      syncPromises.push(dsSave(k, [], null, { forceOverwrite: true }).catch(() => {}));
+    }
+
     try { dsClearTombstones(); } catch (_) {}
+
+    syncPromises.push(
+      dsSave('gc-factory-reset-signal', { at: Date.now(), by: currentUser?.id || 'admin' }, null, { forceOverwrite: true }).catch(() => {})
+    );
+
+    try {
+      await Promise.all(syncPromises);
+      await new Promise(r => setTimeout(r, 500));
+    } catch (_) {}
+
     setSessionLogs([]);
     gcAlert("✅ Réinitialisation complète effectuée.\n\nToutes les données ont été effacées.\nSeul le compte Compte superviseur est conservé.\nLes partenaires de base ont été restaurés.\n\nVous allez être déconnecté.");
     setCurrentUser(null);

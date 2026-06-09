@@ -321,6 +321,11 @@ export const DossiersList = React.memo(function DossiersList() {
   const [showCollabModal, setShowCollabModal] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(null);
   const [showNewDossier, setShowNewDossier] = useState(false);
+  useEffect(() => {
+    const h = () => setShowNewDossier(true);
+    window.addEventListener('gc:open-new-dossier', h);
+    return () => window.removeEventListener('gc:open-new-dossier', h);
+  }, []);
   // File viewer — single file or multi-file picker
   const [showFileViewer, setShowFileViewer] = useState(null); // {files:[{src,name,mime}], idx:0}
 

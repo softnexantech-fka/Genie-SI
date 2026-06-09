@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 // BureauOffice.jsx — SI Génie Consultant v127
 import { _lsGet, _lsSet, _noop, playSound, gcCalcPaie, _activeUser, SIErrorBoundary, gcAIAsk, gcGetActivePlan, dsSave } from '../../core/index.js';
+import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { PROCESS_APP_MATRIX_DEFAULT, PLAN_COMPTABLE_OHADA } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { AIAssistant } from '../../components/AIAssistant.jsx';
@@ -270,6 +271,55 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
     {id:7,section:"Gouvernance",point:"PV du Conseil d'Administration",done:true},
     {id:8,section:"Gouvernance",point:"Rapport de gestion rédigé",done:false},
   ]; } catch (_) { return []; }});
+
+  // FIX v156 — Synchronisation temps réel des données Finance & Logistique internes.
+  // Sans useRemoteSync, les modifications d'un autre poste (journal, budget, stocks, achats)
+  // n'étaient JAMAIS répercutées dans BureauOffice — les états étaient figés à leur valeur LS initiale.
+  useRemoteSync({
+    'gc-journal':          (v) => { if (Array.isArray(v)) { setJournalEntries(v); try { _lsSet("gc-journal", JSON.stringify(v)); } catch (_) {} } },
+    'gc-budget':           (v) => { if (Array.isArray(v)) { setBudgetLines(v);   try { _lsSet("gc-budget",  JSON.stringify(v)); } catch (_) {} } },
+    'gc-risks':            (v) => { if (Array.isArray(v)) { setRiskMatrix(v);    try { _lsSet("gc-risks",   JSON.stringify(v)); } catch (_) {} } },
+    'gc-audit-checklist':  (v) => { if (Array.isArray(v)) { setChecklistItems(v); try { _lsSet("gc-audit-checklist", JSON.stringify(v)); } catch (_) {} } },
+  });
+
+  // FIX v156 — Écouter l'événement global 'gc:data-sync' émis par AppRoot quand
+  // le serveur broadcast une modification Finance/Audit.
+  // Complète useRemoteSync pour les cas où le broadcast arrive via AppRoot plutôt que directement.
+  useEffect(() => {
+    const handler = (e) => {
+      const { key, value } = e.detail || {};
+      if (!key || !Array.isArray(value)) return;
+      switch (key) {
+        case 'gc-journal':         setJournalEntries(value); break;
+        case 'gc-budget':          setBudgetLines(value);    break;
+        case 'gc-risks':           setRiskMatrix(value);     break;
+        case 'gc-audit-checklist': setChecklistItems(value); break;
+        default: break;
+      }
+    };
+    window.addEventListener('gc:data-sync', handler);
+    return () => window.removeEventListener('gc:data-sync', handler);
+  }, []);
+
+  // FIX v156 — Resynchronisation au montage depuis localStorage.
+  // AppRoot hydrate les données Finance/Audit/Logistique depuis le serveur vers le LS APRÈS
+  // que BureauOffice soit déjà monté (et ses états déjà initialisés). Ce useEffect rattrape
+  // ce décalage en relisant le LS ~300ms après le mount (le temps qu'AppRoot hydrate).
+  useEffect(() => {
+    const sync = () => {
+      const jLS = (() => { try { const v = JSON.parse(_lsGet("gc-journal")||"null"); return Array.isArray(v) ? v : null; } catch(_) { return null; } })();
+      const bLS = (() => { try { const v = JSON.parse(_lsGet("gc-budget")||"null");  return Array.isArray(v) ? v : null; } catch(_) { return null; } })();
+      const rLS = (() => { try { const v = JSON.parse(_lsGet("gc-risks")||"null");   return Array.isArray(v) ? v : null; } catch(_) { return null; } })();
+      const cLS = (() => { try { const v = JSON.parse(_lsGet("gc-audit-checklist")||"null"); return Array.isArray(v) ? v : null; } catch(_) { return null; } })();
+      if (jLS && jLS.length > 0) setJournalEntries(prev => prev.length < jLS.length ? jLS : prev);
+      if (bLS && bLS.length > 0) setBudgetLines(prev  => prev.length < bLS.length  ? bLS : prev);
+      if (rLS && rLS.length > 0) setRiskMatrix(prev   => prev.length < rLS.length  ? rLS : prev);
+      if (cLS && cLS.length > 0) setChecklistItems(prev => prev.length < cLS.length ? cLS : prev);
+    };
+    const t = setTimeout(sync, 400);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const saveWriterDoc = () => {
     const now = new Date().toISOString();
@@ -2819,6 +2869,10 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
         currentUser={currentUser}
         setNotifications={setNotifications}
         setTaches={setTaches}
+        dossiers={dossiers}
+        users={users}
+        partners={partners}
+        rdvs={rdvs}
         riskMatrix={riskMatrix}
         setRiskMatrix={setRiskMatrix}
         newRisk={newRisk}
@@ -2907,7 +2961,7 @@ export const BureauOffice = React.memo(function BureauOffice(props) {
   if (activeApp === "logistique") return (
     <div>
       <AppHeader icon="🚚" title="Logistique & Moyens Généraux" color="#78716C" appId="logistique" />
-      <LogistiqueModule T={T} currentUser={currentUser} users={users} setNotifications={setNotifications} isDemoMode={isDemoMode} />
+      <LogistiqueModule T={T} currentUser={currentUser} users={users} setNotifications={setNotifications} isDemoMode={isDemoMode} dossiers={dossiers} taches={taches} setTaches={setTaches} partners={partners} />
     </div>
   );
 

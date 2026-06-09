@@ -318,7 +318,18 @@ const _pendingFetches = new Map(); // key → Promise
 const _pendingGets = new Map(); // key → Promise (déduplication dsGet globale)
 const _rateLimitState = new Map(); // key → { until:number, fails:number }
 
-const REGRESSION_KEYS = new Set(['users', 'dossiers', 'taches', 'rdvs', 'partners', 'gc-users']);
+const REGRESSION_KEYS = new Set([
+  'users', 'dossiers', 'taches', 'rdvs', 'partners', 'gc-users',
+  // FIX v156 — Clés Finance/Audit/Logistique/CRM ajoutées : un poste frais (LS vide)
+  // ne doit jamais écraser les données existantes du serveur avec un tableau vide.
+  'gc-journal', 'gc-budget', 'gc-factures', 'gc-stocks', 'gc-achats',
+  'gc-logmod-stocks', 'gc-inventaires',
+  'gc-risks', 'gc-audit-checklist', 'gc-audit-prog',
+  'gc-crm-relances', 'gc-crm-interactions', 'gc-crm-opps',
+  'gc-crm-clients', 'gc-jur-kyc', 'gc-jur-docs',
+  'gc-docs-unified', 'gc-si-docs', 'gc-standalone-docs',
+  'gc-dossier-files', 'gc-sirh-presences', 'gc-sirh-leaves',
+]);
 function isArrayOfObjectsWithIds(value) {
   return Array.isArray(value) && value.length > 0 && value.every(item => item && typeof item === 'object' && (typeof item.id === 'string' || typeof item.id === 'number'));
 }

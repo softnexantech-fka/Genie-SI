@@ -7,7 +7,7 @@ import { INITIAL_ACHATS, INITIAL_STOCKS } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
 import { gcToast } from '../../components/ToastManager.jsx';
 
-export function LogistiqueModule({ T, currentUser, users=[], setNotifications=_noop, isDemoMode=false }){
+export function LogistiqueModule({ T, currentUser, users=[], setNotifications=_noop, isDemoMode=false, dossiers=[], taches=[], setTaches=_noop, partners=[] }){
   // ── Dialogues React (remplace window.alert/confirm/prompt) ────────
   const _dlg = useDialog();
   const gcAlert   = (msg, title, icon) => _dlg.alert(msg, title, icon);
