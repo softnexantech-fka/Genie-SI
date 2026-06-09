@@ -1086,6 +1086,33 @@ export function SyncControlPanel({ T, currentUser }) {
             style={{ background:'#8B5CF622', border:'1px solid #8B5CF644', color:'#8B5CF6', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
             {loading==='idb' ? '⏳ Sync...' : '📁 Sync fichiers hors ligne (IDB)'}
           </button>
+          <button disabled={!!loading} onClick={async () => {
+            if (!await _dlg.confirm('Reconstruire l\'index fichiers depuis la base serveur ?\n\nUtile si des fichiers sont présents sur le serveur mais ne s\'affichent pas chez certains utilisateurs. L\'opération sera broadcastée à tous les postes.', 'Rebuild index fichiers', null, false)) return;
+            setLoading('rebuild-kv');
+            addLog('Reconstruction index gc-dossier-files...', 'info');
+            try {
+              const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+              const proxyUrl = status?.proxyUrl || 'http://localhost:3001';
+              const r = await fetch(`${proxyUrl}/api/files/rebuild-kv`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+                signal: AbortSignal.timeout(30000),
+              });
+              if (r.ok) {
+                const data = await r.json();
+                addLog(`✅ Index fichiers reconstruit : ${data.count} fichiers indexés — broadcast envoyé à tous les postes`, 'success');
+                playSound('success');
+                gcToast.success(`${data.count} fichiers réindexés — les fichiers seront à nouveau visibles partout`);
+              } else {
+                const err = await r.json().catch(() => ({}));
+                addLog(`Erreur rebuild : ${err.error || r.status}`, 'error');
+              }
+            } catch (e) { addLog(`Erreur : ${e.message}`, 'error'); }
+            setLoading('');
+          }}
+            style={{ background:'#C41E3A22', border:'1px solid #C41E3A44', color:'#C41E3A', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='rebuild-kv' ? '⏳ Rebuild...' : '🗂️ Réparer index fichiers (tous postes)'}
+          </button>
         </div>
       </div>
 

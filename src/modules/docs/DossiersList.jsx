@@ -235,7 +235,7 @@ function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploa
                 <div style={{color:T.textMuted,fontSize:10}}>{f.sizeStr} · {formatDate(f.uploadedAt)} · {f.uploadedByName} · Accès Niv.{f.accessLevel}+</div>
                 {f.description&&<div style={{color:T.textMuted,fontSize:10,fontStyle:"italic"}}>{f.description}</div>}
               </div>
-              {(f.accessLevel<=localUser.level||(localUser?.isAdmin || localUser?.level >= 6))?(
+              {(f.accessLevel<=(Number(localUser?.level)||0)||(localUser?.isAdmin || (Number(localUser?.level)||0) >= 6))?(
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>handleViewFile(f)} title="Voir / Ouvrir" style={{background:"#A855F722",border:"1px solid #A855F744",borderRadius:6,padding:"4px 8px",color:"#A855F7",cursor:"pointer",fontSize:11}}>👁️</button>
                   <button onClick={()=>handleDownloadFile(f)} title="Télécharger" style={{background:"#3B82F622",border:"1px solid #3B82F644",borderRadius:6,padding:"4px 10px",color:"#3B82F6",cursor:"pointer",fontSize:11}}>⬇ {f.downloads>0?`(${f.downloads})`:""}</button>
@@ -331,11 +331,13 @@ export const DossiersList = React.memo(function DossiersList() {
 
   // ── Unified file open utility ─────────────────────────────────────
   // FIX v152 — Priorité serverUrl (fichier serveur) ; fallback dataUrl (cache IDB / offline)
+  // FIX FILE-URL — serverUrl peut être relatif (/api/files/xxx) → le rendre absolu
+  const _absUrl = (url) => (url && url.startsWith('/')) ? `${getProxyUrl()}${url}` : (url || null);
   const openDocFile = async (docOrFile) => {
     // 1. Fichier stocké sur le serveur → ouvrir via fetch authentifié
     if (docOrFile.serverUrl || docOrFile.serverId) {
       try {
-        const url = docOrFile.serverUrl || `${getProxyUrl()}/api/files/${docOrFile.serverId}`;
+        const url = _absUrl(docOrFile.serverUrl) || `${getProxyUrl()}/api/files/${docOrFile.serverId}`;
         const token = getJWTToken?.() || null;
         const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
         const r = await fetch(url, { headers });
@@ -382,11 +384,11 @@ export const DossiersList = React.memo(function DossiersList() {
     if (files.length === 1) { openDocFile(files[0]); return; }
     setShowFileViewer({
       files: files.map(f => ({
-        src:       f.serverUrl || f.dataUrl || f.fileData || '',
+        src:       _absUrl(f.serverUrl) || f.dataUrl || f.fileData || '',
         name:      f.name || f.fileName || f.nom || 'document',
         mime:      f.mimeType || f.fileMime || '',
         id:        f.id,
-        serverUrl: f.serverUrl || (f.serverId ? `${getProxyUrl()}/api/files/${f.serverId}` : null),
+        serverUrl: _absUrl(f.serverUrl) || (f.serverId ? `${getProxyUrl()}/api/files/${f.serverId}` : null),
       })),
       idx: 0,
     });
@@ -747,14 +749,15 @@ export const DossiersList = React.memo(function DossiersList() {
 
   // FIX v152 — handleDownloadFile : priorité serverUrl, fallback dataUrl
   const handleDownloadFile = async (f) => {
-    if (f.accessLevel > localUser.level && !(localUser?.isAdmin || localUser?.level >= 6) && !isMG) {
+    const _userLevel = Number(localUser?.level) || 0;
+    if (f.accessLevel > _userLevel && !(localUser?.isAdmin || _userLevel >= 6) && !isMG) {
       gcAlert("Accès refusé — Habilitation insuffisante."); return;
     }
     saveDossierFiles(prev => prev.map(x => x.id === f.id ? { ...x, downloads: (x.downloads || 0) + 1 } : x));
     // 1. Téléchargement depuis le serveur (fichiers uploadés)
     if (f.serverUrl || f.serverId) {
       try {
-        const url = f.serverUrl || `${getProxyUrl()}/api/files/${f.serverId}`;
+        const url = _absUrl(f.serverUrl) || `${getProxyUrl()}/api/files/${f.serverId}`;
         const token = getJWTToken?.() || null;
         const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
         const r = await fetch(url, { headers });

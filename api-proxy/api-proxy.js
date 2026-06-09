@@ -2213,6 +2213,35 @@ app.get('/api/files', rateLimiter(200), authenticateTokenOptional, async (req, r
   res.json({ ok: true, files: rows });
 });
 
+// [ADMIN] POST /api/files/rebuild-kv — Reconstruit gc-dossier-files depuis si_files
+// Utile pour réparer les machines où gc-dossier-files est désynchronisé (fichiers uploadés avant FIX FILE-SYNC-1)
+app.post('/api/files/rebuild-kv', rateLimiter(5), authenticateToken, async (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'DB indisponible' });
+  if ((req.user?.level || 0) < 5 && !req.user?.isAdmin) return res.status(403).json({ error: 'Niveau 5+ requis' });
+  try {
+    const sql = 'SELECT id,original_name,mime_type,size_bytes,dossier_id,module,uploaded_by,uploaded_at FROM si_files WHERE deleted=0 ORDER BY uploaded_at DESC';
+    const rows = dbMode === 'sqlite3' ? await allAsync(sql, []) : db.prepare(sql).all();
+    const fileRefs = rows.map(r => ({
+      id: r.id,
+      nom: r.original_name,
+      type: r.mime_type,
+      taille: r.size_bytes,
+      module: r.module || 'general',
+      dossierId: r.dossier_id || null,
+      uploadedBy: r.uploaded_by,
+      uploadedAt: r.uploaded_at,
+      synced: true,
+      serverId: r.id,
+      serverUrl: `/api/files/${r.id}`,
+    }));
+    await dbSet('gc-dossier-files', fileRefs, req.user?.id || 'admin');
+    broadcast('data_changed', { key: 'gc-dossier-files', action: 'set', by: req.user?.id, ts: Date.now() }, null);
+    res.json({ ok: true, count: fileRefs.length, message: `${fileRefs.length} fichiers indexés dans gc-dossier-files` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.delete('/api/files/:id', rateLimiter(100), authenticateToken, async (req, res) => {
   const id = req.params.id;
   if (!dbReady) return res.status(404).json({ error: 'DB indisponible' });
