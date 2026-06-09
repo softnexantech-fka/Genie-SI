@@ -225,6 +225,7 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const [filterProcess, setFilterProcess] = useState("all");
   const [filterNature, setFilterNature] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  const [filterDocSource, setFilterDocSource] = useState("all"); // "all"|"externe"|"interne"
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [selectedDossierIds2, setSelectedDossierIds2] = useState([]);
   const [archives, setArchives] = useState(()=>{try{return JSON.parse(_lsGet("gc-docs-archives")||"[]");}catch (_) {return [];}});
@@ -781,10 +782,12 @@ Notes : ${client.notes||"Aucune"}`;
   const activeDossiers = dossiers.filter(d=>d.status!=="ANNULE");
   const closedDossiers = dossiers.filter(d=>["TERMINE","ARCHIVE"].includes(d.status));
   const filteredDossiers = activeDossiers.filter(d=>(filterStatus==="all"||d.status===filterStatus)&&(filterProcess==="all"||d.process===filterProcess)&&(!search||((d.ref||"")+(d.client||"")).toLowerCase().includes(search.toLowerCase())));
+  const _isExterneDoc = (d) => !!(d.dossierId || d.clientId || d.nature === "EXTERNE" || d._src === "dossierFile");
   const filteredDocs = docs.filter(d=>
     (filterProcess==="all"||d.process===filterProcess) &&
     (filterNature==="all"||(d.category||"AUTRE")===filterNature) &&
     (filterCategory==="all"||(d.type||d.category||"AUTRE")===filterCategory) &&
+    (filterDocSource==="all" || (filterDocSource==="externe" ? _isExterneDoc(d) : !_isExterneDoc(d))) &&
     (!search||(d.name+(d.tags||[]).join()).toLowerCase().includes(search.toLowerCase()))
   );
   // FIX vDOCS-CLOSED — Inclure dans allArchives les documents liés aux dossiers terminés/archivés
@@ -1320,7 +1323,7 @@ Notes : ${client.notes||"Aucune"}`;
           ["archives",`🗃️ Archives`],
           ["classification","🏷️ Classification"],
         ].map(([id,l])=>(
-          <button key={id} onClick={async ()=>{setTab(id);setSelectedClient(null);}}
+          <button key={id} onClick={async ()=>{setTab(id);setSelectedClient(null);if(id!=="documents")setFilterDocSource("all");}}
             style={{background:tab===id?"#F9731622":"transparent",border:`1px solid ${tab===id?"#F9731666":T.border}`,borderRadius:7,padding:"7px 13px",color:tab===id?"#F97316":T.textMuted,fontWeight:tab===id?700:400,fontSize:11,position:"relative"}}>
             {l}
             {id==="crm"&&(crmStats.relancesRetard+crmStats.relancesAujourd)>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#EF4444",color:"#fff",borderRadius:"50%",width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{crmStats.relancesRetard+crmStats.relancesAujourd}</span>}
@@ -1343,6 +1346,10 @@ Notes : ${client.notes||"Aucune"}`;
           </select>
         </>}
         {tab==="documents"&&<>
+          {/* Distinction docs internes / externes (liés à des dossiers clients) */}
+          {[["all",`📄 Tous (${docs.length})`],["externe",`🤝 Clients/Partenaires (${docs.filter(_isExterneDoc).length})`],["interne",`🏢 Internes (${docs.filter(d=>!_isExterneDoc(d)).length})`]].map(([k,l])=>(
+            <button key={k} onClick={()=>setFilterDocSource(k)} style={{background:filterDocSource===k?"#6366F122":"transparent",border:`1px solid ${filterDocSource===k?"#6366F166":T.border}`,color:filterDocSource===k?"#6366F1":T.textMuted,borderRadius:7,padding:"5px 11px",cursor:"pointer",fontSize:10,fontWeight:filterDocSource===k?700:400}}>{l}</button>
+          ))}
           <select value={filterNature} onChange={e=>setFilterNature(e.target.value)} style={{background:T.surface2,border:`1px solid ${T.border}`,borderRadius:7,padding:"7px 8px",color:T.text,fontSize:11}}>
             <option value="all">Toutes catégories</option>{CATS.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
@@ -1516,7 +1523,7 @@ Notes : ${client.notes||"Aucune"}`;
 
       {/* ══ TAB DOCUMENTS ══════════════════════════════════════════════════════ */}
       {tab==="documents"&&(
-        filteredDocs.length===0?<div style={{color:T.textMuted,textAlign:"center",padding:28}}>Aucun document importé</div>:(
+        filteredDocs.length===0?<div style={{color:T.textMuted,textAlign:"center",padding:28}}>{filterDocSource==="externe"?"Aucun document client/partenaire":filterDocSource==="interne"?"Aucun document interne":"Aucun document importé"}</div>:(
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
             {filteredDocs.map(d=>{
               const dossier=dossiers.find(x=>x.id===d.dossierId);
@@ -1527,7 +1534,10 @@ Notes : ${client.notes||"Aucune"}`;
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}>
                       <span style={{color:T.text,fontSize:11,fontWeight:700,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</span>
-                      <span style={{background:"#6366F122",color:"#6366F1",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>{d.codif}</span>
+                      {_isExterneDoc(d)
+                        ? <span style={{background:"#F9731622",color:"#F97316",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>🤝 Externe</span>
+                        : <span style={{background:"#A855F722",color:"#A855F7",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>🏢 Interne</span>}
+                      {d.codif&&<span style={{background:"#6366F122",color:"#6366F1",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>{d.codif}</span>}
                     </div>
                     <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                       <span style={{color:T.textDim,fontSize:9}}>{d.type} · {d.size} · {d.createdAt?.slice(0,10)} · {d.createdBy}</span>

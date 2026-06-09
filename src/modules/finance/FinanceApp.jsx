@@ -303,6 +303,27 @@ export function FacturationModule({ T, currentUser, dossiers=[], partners=[], jo
     } catch(_) {}
   };
 
+  // Cascade dossier supprimé → annuler les factures liées
+  React.useEffect(() => {
+    const handler = (e) => {
+      const { id: dossierId, ref: dossierRef } = e.detail || {};
+      if (!dossierId && !dossierRef) return;
+      setFactures(prev => {
+        const updated = prev.map(f =>
+          (f.dossierId === dossierId || f.dossierRef === dossierRef) && f.status !== "ANNULEE"
+            ? { ...f, status: "ANNULEE", annuleAt: new Date().toISOString(), annuleRaison: `Dossier ${dossierRef} supprimé` }
+            : f
+        );
+        if (updated.some((f,i) => f !== prev[i])) {
+          try { const j = JSON.stringify(updated.slice(0,500)); _lsSet("gc-factures", j); dsSave("gc-factures", JSON.parse(j)).catch(() => {}); } catch(_) {}
+        }
+        return updated;
+      });
+    };
+    window.addEventListener('gc:dossier-deleted', handler);
+    return () => window.removeEventListener('gc:dossier-deleted', handler);
+  }, []);
+
   const factInit = {
     client:"", objet:"", dossierId:"", dossierRef:"", montantHT:"", taux:"18",
     echeance:"", notes:"", processus:"O02"
@@ -864,6 +885,9 @@ export function FacturationModule({ T, currentUser, dossiers=[], partners=[], jo
               )}
               {isLvl4 && f.status!=="ANNULEE" && (
                 <button onClick={async () => {if(await gcConfirm(`Annuler la facture ${f.ref} ?`))saveFactures(factures.map(x=>x.id===f.id?{...x,status:"ANNULEE",annuleAt:new Date().toISOString()}:x))}} style={{background:"#9CA3AF22",border:"1px solid #9CA3AF44",color:"#9CA3AF",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>❌ Annuler</button>
+              )}
+              {isLvl5 && (
+                <button onClick={async () => {if(await gcConfirm(`Supprimer définitivement la facture ${f.ref} ? Action irréversible.`,"Suppression définitive","⚠️",true))saveFactures(factures.filter(x=>x.id!==f.id))}} style={{background:"#EF444415",border:"1px solid #EF444444",color:"#EF4444",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>🗑️ Purger</button>
               )}
             </div>
           </div>

@@ -76,6 +76,17 @@ export function Dashboard() {
   const totalGlobal = dossiers.reduce((a, d) => a + (d.amount || 0), 0);
   const caGlobal = dossiers.filter(d => d.status === "TERMINE").reduce((a, d) => a + (d.amount || 0), 0);
 
+  // -- Présence réelle (gc-presence heartbeat 45s) pour indicateur "en ligne" ──
+  const [_gcPresence, _setGcPresence] = React.useState(() => {
+    try { return JSON.parse(_lsGet('gc-presence') || '{}'); } catch (_) { return {}; }
+  });
+  React.useEffect(() => {
+    const h = () => { try { _setGcPresence(JSON.parse(_lsGet('gc-presence') || '{}')); } catch (_) {} };
+    window.addEventListener('storage', h);
+    const t = setInterval(h, 30000);
+    return () => { window.removeEventListener('storage', h); clearInterval(t); };
+  }, []);
+
   // -- Données journal OHADA  -  synchronisées en live depuis localStorage --
   const [_journalRefresh, _setJournalRefresh] = React.useState(0);
   React.useEffect(() => {
@@ -387,7 +398,8 @@ export function Dashboard() {
               .slice(0, 6)
               .map(log => {
                 const u = users.find(x => x.id === log.userId) || { name: log.userName, avatar: "?", color: "#555", level: log.userLevel || 1, process: log.userProcess || "—" };
-                const isRecent = (Date.now() - new Date(log.at).getTime()) < 15 * 60 * 1000; // < 15 min = "en ligne"
+                const presenceTs = _gcPresence[log.userId];
+                const isRecent = presenceTs && (Date.now() - presenceTs) < 45000;
                 return (
                   <div key={log.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: `1px solid ${T.border}20` }}>
                     <div style={{ width: 24, height: 24, borderRadius: "50%", background: u.color || "#555", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff", fontWeight: 700 }}>{u.avatar || (u.name||"?")[0]}</div>
@@ -395,7 +407,7 @@ export function Dashboard() {
                       <div style={{ color: T.text, fontSize: 11, fontWeight: 600 }}>{log.userName || u.name}</div>
                       <div style={{ color: T.textMuted, fontSize: 9 }}>Niv.{u.level} • {u.process} • {formatDateTime(log.at)}</div>
                     </div>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRecent ? "#22C55E" : "#7A90B0" }} title={isRecent ? "Connexion récente (<15 min)" : "Dernière connexion"} />
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: isRecent ? "#22C55E" : "#7A90B0" }} title={isRecent ? "En ligne (actif <45s)" : "Hors ligne"} />
                   </div>
                 );
               })

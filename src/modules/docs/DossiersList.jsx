@@ -588,6 +588,8 @@ export const DossiersList = React.memo(function DossiersList() {
           if (linkedRdvs.length > 0)   setRdvs(prev => { const u=prev.map(r=>r.dossierId===d.id?{...r,dossierId:null,dossierDetached:true}:r); dsSave("rdvs",u,null,{forceOverwrite:false}).catch(err => gcToast.syncError('', err)); return u; });
         }
       }
+      // Cascade Finance — annuler les factures liées au dossier
+      window.dispatchEvent(new CustomEvent('gc:dossier-deleted', { detail: { id: d.id, ref: d.ref, client: d.client } }));
       addSessionLog && addSessionLog("SUPPRESSION", localUser, { status:"SUCCESS", reason:`Suppression dossier ${d.ref}` });
       setNotifications(prev=>[{id:"N"+Date.now(),icon:"🗑️",message:`Dossier ${d.ref} supprimé par ${localUser.name}`,at:new Date().toISOString(),read:false},...prev]);
       playSound("success");
@@ -623,6 +625,7 @@ export const DossiersList = React.memo(function DossiersList() {
     });
     saveDossierFiles(prev=>prev.filter(f=>f.dossierId!==req.dossierId));
     savePendingDeleteApprovals(prev=>prev.map(r=>r.id===req.id?{...r,status:"APPROUVE",approvedAt:new Date().toISOString(),approvedBy:localUser.id}:r));
+    window.dispatchEvent(new CustomEvent('gc:dossier-deleted', { detail: { id: req.dossierId, ref: req.dossierRef, client: req.dossierClient } }));
     setNotifications(prev=>[{id:"N"+Date.now(),icon:"✅",message:`✅ Suppression approuvée : ${req.dossierRef} (demandé par ${req.requestedByName})`,at:new Date().toISOString(),read:false},...prev]);
     addSessionLog && addSessionLog("SUPPRESSION", localUser, { status:"SUCCESS", reason:`Suppression approuvée dossier ${req.dossierRef}` });
     setShowDeleteReview(null); playSound("success");
@@ -826,13 +829,8 @@ export const DossiersList = React.memo(function DossiersList() {
   const canDeleteDossier = (d) => {
     // Admin : toujours
     if ((localUser?.isAdmin || localUser?.level >= 6)) return true;
-    // DG/Niv5 : toujours
+    // DG/Niv5 : toujours (suppression totale dossier réservée niv 5+)
     if (localUser.level >= 5) return true;
-    // Niv 4 dans son processus (ou O01)
-    if (localUser.level >= 4 && (myProcs.includes(d.process) || isO01)) return true;
-    // Créateur ou assigné : peut supprimer si le dossier n'est pas encore validé/terminé
-    if ((d.createdBy === localUser.id || d.assignedTo === localUser.id)
-        && ["ATTENTE_TRAITEMENT","EN_COURS","REJETE"].includes(d.status)) return true;
     return false;
   };
 
