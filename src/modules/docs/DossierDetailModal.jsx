@@ -325,7 +325,7 @@ export function DossierDetailModal({ dossier, setSelectedDossier=_noop, T, local
                         : `${((ref.taille||0)/1048576).toFixed(1)} Mo`,
                       mimeType: ref.type,
                       dataUrl: ref?.dataUrl || null,
-                      description: '', accessLevel: localUser.level,
+                      description: '', accessLevel: 1,
                       uploadedBy: localUser.id, uploadedByName: localUser.name,
                       uploadedAt: new Date().toISOString(), downloads: 0,
                     }))]);

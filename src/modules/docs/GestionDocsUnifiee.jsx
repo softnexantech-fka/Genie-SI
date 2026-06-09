@@ -214,8 +214,10 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const setPartnersSync = si?.setPartnersSync || _noop;
   const rdvs = si?.rdvs || [];
   const setRdvs = si?.setRdvs || _noop;
-  const lvl = currentUser?.level || 1;
+  const lvl = Number(currentUser?.level) || 1;
   const isAdmin = currentUser?.isAdmin || lvl >= 6;
+  // Vérifie si l'utilisateur peut accéder à un doc en fonction de son accessLevel
+  const _canAccessDoc = (d) => isAdmin || d.createdBy === currentUser?.id || (d.accessLevel == null) || d.accessLevel <= lvl;
   const canManageCRM = isAdmin || lvl >= 3 || currentUser?.process === "O01" || (currentUser?.processes||[]).includes("O01");
 
   // ── Données Docs & Archives ──────────────────────────────────────────────
@@ -784,6 +786,7 @@ Notes : ${client.notes||"Aucune"}`;
   const filteredDossiers = activeDossiers.filter(d=>(filterStatus==="all"||d.status===filterStatus)&&(filterProcess==="all"||d.process===filterProcess)&&(!search||((d.ref||"")+(d.client||"")).toLowerCase().includes(search.toLowerCase())));
   const _isExterneDoc = (d) => !!(d.dossierId || d.clientId || d.nature === "EXTERNE" || d._src === "dossierFile");
   const filteredDocs = docs.filter(d=>
+    _canAccessDoc(d) &&
     (filterProcess==="all"||d.process===filterProcess) &&
     (filterNature==="all"||(d.category||"AUTRE")===filterNature) &&
     (filterCategory==="all"||(d.type||d.category||"AUTRE")===filterCategory) &&
@@ -1541,6 +1544,7 @@ Notes : ${client.notes||"Aucune"}`;
                     </div>
                     <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                       <span style={{color:T.textDim,fontSize:9}}>{d.type} · {d.size} · {d.createdAt?.slice(0,10)} · {d.createdBy}</span>
+                      {d.accessLevel > 1 && <span style={{background:"#EF444415",color:"#EF4444",borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>🔒 Niv.{d.accessLevel}+</span>}
                       {dossier&&<span style={{background:"#3B82F622",color:"#3B82F6",borderRadius:3,padding:"1px 5px",fontSize:8}}>📋 {dossier.ref}</span>}
                       {client&&<span style={{background:"#F9731622",color:"#F97316",borderRadius:3,padding:"1px 5px",fontSize:8}}>👤 {client.nom}</span>}
                       {(d.tags||[]).map(t=><span key={t} style={{background:"#6366F122",color:"#6366F1",borderRadius:3,padding:"1px 5px",fontSize:8}}>#{t}</span>)}
@@ -1548,7 +1552,7 @@ Notes : ${client.notes||"Aucune"}`;
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
                     {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>viewDoc(d)} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>👁️ Voir</button>}
-                    {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>⬇ DL</button>}
+                    {(d.id||d.serverUrl||d.url||d.dataUrl)&&_canAccessDoc(d)&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>⬇ DL</button>}
                     {/* FIX v123 — bouton ✏️ manquant : documents non modifiables */}
                     {canEditDoc&&<button onClick={()=>openEditDoc(d)} title="Modifier" style={{background:"#6366F122",border:"1px solid #6366F144",color:"#6366F1",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>✏️</button>}
                     <button onClick={()=>archiveDoc(d)} style={{background:"#6B708022",border:"1px solid #6B708044",color:"#6B7080",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>🗃️</button>

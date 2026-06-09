@@ -243,7 +243,7 @@ function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploa
               ):(
                 <span style={{color:"#EF4444",fontSize:10,padding:"4px 8px"}}>🔒 Niv.{f.accessLevel}+</span>
               )}
-              {(f.uploadedBy===localUser.id||localUser.level>=4||(localUser?.isAdmin || localUser?.level >= 6))&&(
+              {(f.uploadedBy===localUser?.id||(Number(localUser?.level)||0)>=4||(localUser?.isAdmin || (Number(localUser?.level)||0) >= 6))&&(
                 <button onClick={()=>handleDeleteFile(f)} style={{background:"#EF444415",border:"1px solid #EF444444",borderRadius:6,padding:"4px 8px",color:"#EF4444",cursor:"pointer",fontSize:11}}>🗑️</button>
               )}
             </div>
@@ -307,7 +307,7 @@ export const DossiersList = React.memo(function DossiersList() {
   const [selectedDossiers, setSelectedDossiers] = useState([]); // multi-select checkboxes
   const [selectedDocs, setSelectedDocs] = useState([]); // multi-select for docs
   const [newDossierForm, setNewDossierForm] = useState({ client:"", objet:"", process:localUser.process||"O02", priority:"NORMALE", dueDate:"", amount:"", nature:"EXTERNE", submitTo:"", submitAction:"TRAITER", submitMotif:"", partnerId:"", confidentiel:false, confPass:"", confAccess:[] });
-  const [newDocForm, setNewDocForm] = useState({ titre:"", type:"DOC", process:localUser.process||"O02", description:"", nature:"INTERNE", linkedUserId:"", partnerId:"", dossierId:"", submitTo:"", submitAction:"CONSULTER", accessLevel: localUser.level, fileData:"", fileName:"", fileSize:0, fileExt:"", fileMime:"" });
+  const [newDocForm, setNewDocForm] = useState({ titre:"", type:"DOC", process:localUser.process||"O02", description:"", nature:"INTERNE", linkedUserId:"", partnerId:"", dossierId:"", submitTo:"", submitAction:"CONSULTER", accessLevel: 1, fileData:"", fileName:"", fileSize:0, fileExt:"", fileMime:"" });
   const [dossierSubTab, setDossierSubTab] = useState("dossiers");
   const [docSearch, setDocSearch] = useState("");
   const [docFilter, setDocFilter] = useState("ALL");
@@ -405,7 +405,7 @@ export const DossiersList = React.memo(function DossiersList() {
   const [showEditModal, setShowEditModal] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [deleteMotif, setDeleteMotif] = useState("");
-  const [uploadForm, setUploadForm] = useState({ description:"", accessLevel:localUser.level, fileName:"", fileData:"", fileSize:0, fileExt:"", fileMime:"" });
+  const [uploadForm, setUploadForm] = useState({ description:"", accessLevel:1, fileName:"", fileData:"", fileSize:0, fileExt:"", fileMime:"" });
   const uploadRef = useRef(null);
 
   const NATURE_CONFIG = {
@@ -733,7 +733,7 @@ export const DossiersList = React.memo(function DossiersList() {
     setNotifications(prev=>[{id:"N"+Date.now(),icon:"📎",message:`Fichier ajouté : "${newFile.name}" → Dossier ${d.ref}`,at:new Date().toISOString(),read:false},...prev]);
     addSessionLog && addSessionLog("UPLOAD", localUser, { status:"SUCCESS", reason:`Upload "${newFile.name}" — ${d.ref}` });
     setShowUploadModal(null);
-    setUploadForm({description:"",accessLevel:localUser.level,fileName:"",fileData:"",fileSize:0,fileExt:"",fileMime:""});
+    setUploadForm({description:"",accessLevel:1,fileName:"",fileData:"",fileSize:0,fileExt:"",fileMime:""});
     setFileUploadStatus(null);
     playSound("success");
   };
