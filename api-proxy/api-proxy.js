@@ -1148,6 +1148,11 @@ io.on('connection', (socket) => {
           socket.emit('identified', { ok: true, socketId: socket.id, clients: connectedClients.size, verified: true });
           console.log(`👤 Identifié (JWT): ${user.username} (${socket.id})`);
           auditLog(user.id, 'WS_CONNECT', 'socket', 'Connexion WebSocket vérifiée', ip);
+          // FIX SYNC-INIT — Envoyer sync_init ciblé juste après identification
+          // Force ce client (et ce client seul) à invalider son cache et re-fetcher depuis le serveur
+          setTimeout(() => {
+            socket.emit('sync_init', { ts: Date.now(), reason: 'identify_complete' });
+          }, 800);
         });
         return;
       }
@@ -1158,6 +1163,14 @@ io.on('connection', (socket) => {
       socket.emit('identified', { ok: true, socketId: socket.id, clients: connectedClients.size, verified: false, anonymous: true });
     } catch (e) {
       socket.emit('identified', { ok: false, error: 'Erreur identification' });
+    }
+  });
+
+  // FIX SYNC-INIT — Réponse à la demande de resync ciblée d'un client (après Ctrl+R / reconnexion)
+  socket.on('client_sync_request', () => {
+    const info = connectedClients.get(socket.id);
+    if (info?.verified) {
+      socket.emit('sync_init', { ts: Date.now(), reason: 'client_request' });
     }
   });
 
@@ -1244,6 +1257,19 @@ io.on('connection', (socket) => {
     console.log(`🔌 Déconnecté: ${socket.id} — total: ${connectedClients.size}`);
   });
 });
+
+// FIX SYNC-HB — Heartbeat serveur toutes les 30s : broadcast 'heartbeat_sync' à tous les clients.
+// Garantit que même les clients passifs (sans activité WebSocket récente) restent synchronisés.
+// Chaque client invalide son cache local et re-fetch les données stales depuis le serveur.
+setInterval(() => {
+  if (io.sockets.sockets.size === 0) return;
+  const ts = Date.now();
+  io.emit('heartbeat_sync', { ts });
+  // Log discret (toutes les 10 heartbeats = 5 min) pour éviter de noyer les logs
+  if (Math.floor(ts / 30_000) % 10 === 0) {
+    console.log(`[HB] Heartbeat sync → ${io.sockets.sockets.size} client(s) connecté(s)`);
+  }
+}, 30_000);
 
 // ═══════════════════════════════════════════════════════════════
 //  ROUTES
@@ -2447,8 +2473,8 @@ app.post('/api/sync/resync-all', rateLimiter(5, 60_000), authenticateToken, asyn
 // COLLECT-ALL — Demande à tous les clients de pousser leurs données locales vers le serveur
 // Le serveur agrège via union-merge (tombstones respectés) puis rediffuse un resync_all
 app.post('/api/sync/collect-all', rateLimiter(3, 120_000), authenticateToken, async (req, res) => {
-  if (!req.user?.isAdmin && (req.user?.level || 0) < 6) {
-    return res.status(403).json({ error: 'Admin système requis' });
+  if (!req.user?.isAdmin && (req.user?.level || 0) < 5) {
+    return res.status(403).json({ error: 'Niveau 5+ requis' });
   }
   const userId = req.user?.id || 'admin';
   const collectId = `collect-${Date.now()}`;

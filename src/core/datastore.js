@@ -537,6 +537,14 @@ async function initWebSocket() {
       _socketReady = true;
       console.log('[DS] WebSocket connecté:', _socket.id);
 
+      // FIX SYNC-RELOAD — Vider les timestamps locaux à chaque reconnexion (Ctrl+R, reprise réseau)
+      // Cela force le serveur à faire autorité sur la prochaine lecture dsGet.
+      try {
+        const tsKeys = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        tsKeys.forEach(k => localStorage.removeItem(k));
+        if (tsKeys.length) console.log(`[DS] Reconnect: ${tsKeys.length} timestamps locaux vidés → serveur fait autorité`);
+      } catch {}
+
       // [D2] Identifier avec JWT token pour vérification côté serveur
       try {
         const sess  = JSON.parse(_lsGet('gc-active-session') || 'null');
@@ -545,8 +553,6 @@ async function initWebSocket() {
           _socket.emit('identify', {
             userId:   sess.userId,
             userName: sess.userName || sess.name || sess.userId,
-            // Token JWT envoyé pour vérification côté serveur
-            // Si absent (première connexion avant login), le serveur identifie anonymement
             token:    token ? token.replace(/^Bearer /, '') : undefined,
           });
         }
@@ -554,6 +560,11 @@ async function initWebSocket() {
 
       // Flusher la file d'attente offline de façon fiable (HTTP + retry)
       flushOfflineQueue().catch(() => {});
+
+      // Demander un resync complet depuis le serveur (permet sync_init ciblé)
+      setTimeout(() => {
+        try { _socket.emit('client_sync_request'); } catch {}
+      }, 1200);
     });
 
     _socket.on('disconnect', (reason) => {
@@ -757,6 +768,38 @@ async function initWebSocket() {
       console.log(`[DS] ✅ Sync offline: ${synced}/${total} éléments`);
     });
 
+    // FIX SYNC-HB — Heartbeat serveur toutes les 30s → invalider cache + notifier hooks
+    // Le serveur broadcast 'heartbeat_sync' à tous les clients connectés pour s'assurer
+    // que même les clients passifs (sans activité récente) aient des données à jour.
+    _socket.on('heartbeat_sync', ({ ts, keys: hbKeys } = {}) => {
+      const keysToInvalidate = Array.isArray(hbKeys) && hbKeys.length ? hbKeys : [...SHARED_KEYS];
+      keysToInvalidate.forEach(k => { _cache.delete(k); _pendingFetches.delete(k); });
+      _syncListeners.forEach(fn => {
+        try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: ts || Date.now() }); } catch {}
+      });
+      // Aussi dispatcher des StorageEvents pour useRemoteSync (écoute 'storage')
+      const critical = ['dossiers','taches','rdvs','partners','users','gc-dossier-files','gc-docs-unified','gc-notifications','gc-messages-global','gc-session-logs','gc-app-habilitations'];
+      critical.forEach(k => {
+        try { window.dispatchEvent(new StorageEvent('storage', { key: `__GC__${k}`, newValue: JSON.stringify({ ts: ts || Date.now(), action: 'heartbeat' }) })); } catch {}
+      });
+    });
+
+    // FIX SYNC-INIT — Le serveur répond à client_sync_request avec sync_init
+    // Déclenche un resync ciblé pour ce seul client (sans affecter les autres)
+    _socket.on('sync_init', ({ ts, reason } = {}) => {
+      console.log(`[DS] sync_init reçu (${reason || 'connect'}) — resync complet`);
+      _cache.clear();
+      _pendingFetches.clear();
+      try {
+        const tsKeys = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        tsKeys.forEach(k => localStorage.removeItem(k));
+      } catch {}
+      _syncListeners.forEach(fn => {
+        try { fn({ key: '__all__', action: 'force_resync', ts: ts || Date.now() }); } catch {}
+      });
+      try { window.dispatchEvent(new CustomEvent('gc-resync-all', { detail: { by: 'server', ts, reason } })); } catch {}
+    });
+
     _socket.on('connect_error', (err) => {
       if (err.message !== 'xhr poll error') { // Silencieux pour erreurs polling normales
         console.warn('[DS] WebSocket erreur connexion:', err.message);
@@ -883,13 +926,19 @@ export function dsStartSync(onUpdate) {
 
   startOfflineRetryLoop();
 
-  // FIX SYNC-P1 — Heartbeat resync toutes les 60s pour les clients passifs.
-  // Invalide le cache des clés critiques pour forcer un re-fetch discret en arrière-plan.
-  // Évite qu'un client reste "bloqué" sur des données périmées s'il a manqué des broadcasts.
+  // FIX SYNC-P1 v2 — Heartbeat resync toutes les 30s pour les clients passifs.
+  // Toutes les clés partagées sont invalidées toutes les 30s (3 ticks × 10s).
+  // Le serveur émet aussi 'heartbeat_sync' toutes les 30s → double couverture.
   let _heartbeatTick = 0;
+  // Toutes les clés critiques partagées (superset du précédent)
   const HEARTBEAT_KEYS = [
-    'users', 'gc-users', 'dossiers', 'taches', 'gc-dossier-files', 'gc-files',
-    'gc-notifications', 'gc-messages-global', 'gc-presence',
+    'users','gc-users','dossiers','taches','rdvs','partners',
+    'gc-dossier-files','gc-files','gc-docs-unified','gc-standalone-docs',
+    'gc-notifications','gc-messages-global','gc-session-logs',
+    'gc-app-habilitations','gc-presence','gc-factures','gc-budget',
+    'gc-risks','gc-audit-checklist','gc-crm-relances','gc-crm-interactions',
+    'gc-crm-opps','gc-jur-kyc','gc-jur-docs','gc-stocks',
+    'gc-internal-docs','gc-external-docs','gc-messages',
   ];
 
   const interval = setInterval(async () => {
@@ -899,21 +948,19 @@ export function dsStartSync(onUpdate) {
     }
     if (nowOnline) {
       await flushOfflineQueue();
-      // FIX SYNC-P1 : Toutes les 60s (6 ticks × 10s), invalider les clés critiques
+      // Toutes les 30s (3 ticks × 10s), invalider toutes les clés heartbeat
       _heartbeatTick++;
-      if (_heartbeatTick % 6 === 0) {
+      if (_heartbeatTick % 3 === 0) {
         let invalidated = 0;
         HEARTBEAT_KEYS.forEach(k => {
           const cached = _cache.get(k);
-          // N'invalider que si la donnée a plus de 45s (évite d'écraser un fetch récent)
-          if (!cached || Date.now() - cached.ts > 45_000) {
+          // Invalider si donnée > 25s (légèrement inférieur au TTL 30s pour assurer fraîcheur)
+          if (!cached || Date.now() - cached.ts > 25_000) {
             _cache.delete(k);
             _pendingFetches.delete(k);
             invalidated++;
           }
         });
-        // FIX PERF-R1 — Ne notifier les hooks QUE si du cache a été réellement invalidé
-        // Évite des re-renders React inutiles sur tous les composants abonnés toutes les 60s.
         if (invalidated > 0) {
           _syncListeners.forEach(fn => {
             try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: Date.now() }); } catch {}
