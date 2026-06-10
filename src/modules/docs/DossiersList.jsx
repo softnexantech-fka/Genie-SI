@@ -925,20 +925,21 @@ export const DossiersList = React.memo(function DossiersList() {
   const allDocs = [
     ...visibleStandaloneDocs.map(d=>({...d, _src:"standalone"})),
     ...visibleDossierFiles.map(f=>({...f, _src:"dossierFile", titre:f.name, nature:f.dossierId?"EXTERNE":"INTERNE", createdAt:f.uploadedAt, createdByName:f.uploadedByName, createdBy:f.uploadedBy}))
-  ].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+  ].sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
 
+  const _str = (v) => typeof v === "string" ? v : v ? String(v) : "";
   const filteredDocs = allDocs.filter(doc => {
     const q = docSearch.toLowerCase();
-    const matchSearch = !q || (doc.titre||"").toLowerCase().includes(q) || (doc.description||"").toLowerCase().includes(q) || (doc.process||"").toLowerCase().includes(q) || (doc.partnerNom||doc.dossierRef||"").toLowerCase().includes(q) || (doc.createdByName||"").toLowerCase().includes(q) || (doc.type||"").toLowerCase().includes(q);
+    const matchSearch = !q || (_str(doc.titre)).toLowerCase().includes(q) || (_str(doc.description)).toLowerCase().includes(q) || (_str(doc.process)).toLowerCase().includes(q) || (_str(doc.partnerNom||doc.dossierRef)).toLowerCase().includes(q) || (_str(doc.createdByName)).toLowerCase().includes(q) || (_str(doc.type)).toLowerCase().includes(q);
     const matchNature = docFilter==="ALL" || (doc.nature||"INTERNE")===docFilter;
     const matchType = docTypeFilter==="ALL" || (doc.type||"DOC")===docTypeFilter;
     const matchProc = docProcessFilter==="ALL" || (doc.process||"")===docProcessFilter;
     return matchSearch && matchNature && matchType && matchProc;
   }).sort((a,b)=>{
-    if (docSort==="date_desc") return (b.createdAt||"").localeCompare(a.createdAt||"");
-    if (docSort==="date_asc") return (a.createdAt||"").localeCompare(b.createdAt||"");
-    if (docSort==="titre_asc") return (a.titre||"").localeCompare(b.titre||"");
-    if (docSort==="titre_desc") return (b.titre||"").localeCompare(a.titre||"");
+    if (docSort==="date_desc") return _str(b.createdAt).localeCompare(_str(a.createdAt));
+    if (docSort==="date_asc") return _str(a.createdAt).localeCompare(_str(b.createdAt));
+    if (docSort==="titre_asc") return _str(a.titre).localeCompare(_str(b.titre));
+    if (docSort==="titre_desc") return _str(b.titre).localeCompare(_str(a.titre));
     if (docSort==="size_desc") return (b.fileSize||0)-(a.fileSize||0);
     return 0;
   });
