@@ -217,7 +217,7 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const lvl = Number(currentUser?.level) || 1;
   const isAdmin = currentUser?.isAdmin || lvl >= 6;
   // Vérifie si l'utilisateur peut accéder à un doc en fonction de son accessLevel
-  const _canAccessDoc = (d) => isAdmin || d.createdBy === currentUser?.id || (d.accessLevel == null) || d.accessLevel <= lvl;
+  const _canAccessDoc = (d) => !d ? false : isAdmin || d.createdBy === currentUser?.id || (d.accessLevel == null) || d.accessLevel <= lvl;
   const canManageCRM = isAdmin || lvl >= 3 || currentUser?.process === "O01" || (currentUser?.processes||[]).includes("O01");
 
   // ── Données Docs & Archives ──────────────────────────────────────────────
@@ -782,19 +782,19 @@ Notes : ${client.notes||"Aucune"}`;
   // FIX vDOCS-CLOSED — Tous les dossiers actifs ET terminés/archivés sont visibles
   // pour ne jamais perdre la trace des documents liés à des dossiers clôturés.
   const activeDossiers = dossiers.filter(d=>d.status!=="ANNULE");
-  const closedDossiers = dossiers.filter(d=>["TERMINE","ARCHIVE"].includes(d.status));
-  const filteredDossiers = activeDossiers.filter(d=>(filterStatus==="all"||d.status===filterStatus)&&(filterProcess==="all"||d.process===filterProcess)&&(!search||((d.ref||"")+(d.client||"")).toLowerCase().includes(search.toLowerCase())));
-  const _isExterneDoc = (d) => !!(d.dossierId || d.clientId || d.nature === "EXTERNE" || d._src === "dossierFile");
+  const closedDossiers = dossiers.filter(d=>d&&["TERMINE","ARCHIVE"].includes(d.status));
+  const filteredDossiers = activeDossiers.filter(d=>d&&(filterStatus==="all"||d.status===filterStatus)&&(filterProcess==="all"||d.process===filterProcess)&&(!search||((d.ref||"")+(d.client||"")).toLowerCase().includes(search.toLowerCase())));
+  const _isExterneDoc = (d) => !!(d&&(d.dossierId || d.clientId || d.nature === "EXTERNE" || d._src === "dossierFile"));
   const filteredDocs = docs.filter(d=>
-    _canAccessDoc(d) &&
+    d && _canAccessDoc(d) &&
     (filterProcess==="all"||d.process===filterProcess) &&
     (filterNature==="all"||(d.category||"AUTRE")===filterNature) &&
     (filterCategory==="all"||(d.type||d.category||"AUTRE")===filterCategory) &&
     (filterDocSource==="all" || (filterDocSource==="externe" ? _isExterneDoc(d) : !_isExterneDoc(d))) &&
-    (!search||(d.name+(d.tags||[]).join()).toLowerCase().includes(search.toLowerCase()))
+    (!search||((d.name||"")+(d.tags||[]).join()).toLowerCase().includes(search.toLowerCase()))
   );
   // FIX vDOCS-CLOSED — Inclure dans allArchives les documents liés aux dossiers terminés/archivés
-  const docsLinkedToClosedDossiers = docs.filter(d => d.dossierId && closedDossiers.some(cd => cd.id === d.dossierId));
+  const docsLinkedToClosedDossiers = docs.filter(d => d && d.dossierId && closedDossiers.some(cd => cd.id === d.dossierId));
   const allArchives = [
     ...archives,
     ...docsLinkedToClosedDossiers.filter(d => !archives.find(a => a.id === d.id)).map(d => ({
@@ -805,8 +805,8 @@ Notes : ${client.notes||"Aucune"}`;
       _fromClosedDossier: true,
       _linkedDossier: closedDossiers.find(cd => cd.id === d.dossierId),
     })),
-    ...closedDossiers.map(d=>({id:"DS-"+d.id,name:`Dossier ${d.ref||""} — ${d.client||""}`,type:"DOSSIER",category:"DOSSIER_CLOS",archivedAt:d.updatedAt,isDossier:true, _docsCount: docs.filter(x=>x.dossierId===d.id).length}))
-  ].filter(a=>!search||((a.name||"")+(a.category||"")).toLowerCase().includes(search.toLowerCase()));
+    ...closedDossiers.map(d=>({id:"DS-"+d.id,name:`Dossier ${d.ref||""} — ${d.client||""}`,type:"DOSSIER",category:"DOSSIER_CLOS",archivedAt:d.updatedAt,isDossier:true, _docsCount: docs.filter(x=>x&&x.dossierId===d.id).length}))
+  ].filter(a=>a&&(!search||((a.name||"")+(a.category||"")).toLowerCase().includes(search.toLowerCase())));
 
   const docsPerDossier = docs.reduce((a,d)=>{if(d.dossierId){a[d.dossierId]=(a[d.dossierId]||0)+1;}return a;},{});
 

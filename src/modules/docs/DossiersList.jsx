@@ -221,7 +221,7 @@ function CollabModal({ T, dossier, users, localUser, partners, handleSaveCollabs
 
 // ── UploadModal — DOIT être hors DossiersList pour éviter re-mount à chaque render ──
 function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploadForm, fileUploadStatus, setFileUploadStatus, uploadRef, handleFileSelect, handleSaveUpload, handleDownloadFile, handleViewFile, handleDeleteFile, saveDossierFiles, setShowUploadModal, gcDocIcon, formatDate }) {
-  const thisDossierFiles = (dossierFiles||[]).filter(f=>f.dossierId===dossier.id);
+  const thisDossierFiles = (dossierFiles||[]).filter(f=>f&&f.dossierId===dossier.id);
   return (
     <Modal title={`📎 Fichiers — ${dossier.ref}`} onClose={()=>setShowUploadModal(null)} T={T} wide>
       {thisDossierFiles.length>0&&(
@@ -804,22 +804,23 @@ export const DossiersList = React.memo(function DossiersList() {
   // Niv 2 : voient uniquement les dossiers qui les concernent directement
   const canSeeAll = localUser.level >= 4 || (localUser?.isAdmin || localUser?.level >= 6);
 
-  const userDossiers = canSeeAll ? dossiers :
+  const userDossiers = canSeeAll ? dossiers.filter(Boolean) :
     localUser.level >= 3
       ? dossiers.filter(d =>
-          // Niv3 : voit son processus + ceux assignés + TOUS les autres en lecture seule
-          d.assignedTo === localUser.id ||
+          d &&
+          (d.assignedTo === localUser.id ||
           d.createdBy === localUser.id ||
           d.submittedTo === localUser.id ||
           (d.collaborators || []).includes(localUser.id) ||
           myProcs.includes(d.process) ||
-          true // niv 3+ voit tous les dossiers en lecture
+          true) // niv 3+ voit tous les dossiers en lecture
         )
       : dossiers.filter(d =>
-          d.assignedTo === localUser.id ||
+          d &&
+          (d.assignedTo === localUser.id ||
           d.createdBy === localUser.id ||
           d.submittedTo === localUser.id ||
-          (d.collaborators || []).includes(localUser.id)
+          (d.collaborators || []).includes(localUser.id))
         );
 
   // -- Droits d'action granulaires -----------------------------------------
@@ -894,10 +895,10 @@ export const DossiersList = React.memo(function DossiersList() {
   };
 
   const filtered = userDossiers.filter(d=>
-    // v99 — filtre KYC_ATTENTE
+    d &&
     (filter==="ALL"||(filter==="KYC_ATTENTE"&&d.intakeDocs?.length>0&&d.kycStatutDossier!=="VALIDE")||(filter!=="ALL"&&filter!=="KYC_ATTENTE"&&d.status===filter))&&
     (dosType==="ALL"||(d.nature||"EXTERNE")===dosType)&&
-    (!search||d.client.toLowerCase().includes(search.toLowerCase())||d.ref.toLowerCase().includes(search.toLowerCase())||(d.objet||"").toLowerCase().includes(search.toLowerCase()))
+    (!search||(d.client||"").toLowerCase().includes(search.toLowerCase())||(d.ref||"").toLowerCase().includes(search.toLowerCase())||(d.objet||"").toLowerCase().includes(search.toLowerCase()))
   );
 
   const pendingReviewForMe = (pendingDeleteApprovals||[]).filter(r=>r.superiorId===localUser.id&&r.status==="EN_ATTENTE");
@@ -908,15 +909,17 @@ export const DossiersList = React.memo(function DossiersList() {
 
   const _docMyProcs = localUser.processes || [localUser.process];
   const visibleStandaloneDocs = (standaloneDocuments||[]).filter(doc => {
+    if (!doc) return false;
     if ((localUser?.isAdmin || localUser?.level >= 6) || localUser.level >= 4) return true;
     if (doc.accessLevel && doc.accessLevel > localUser.level) return false;
     if (localUser.level >= 3) return _docMyProcs.includes(doc.process) || doc.createdBy === localUser.id || doc.submitTo === localUser.id || doc.linkedUserId === localUser.id;
     return doc.createdBy === localUser.id || doc.submitTo === localUser.id || doc.linkedUserId === localUser.id;
   });
   const visibleDossierFiles = (dossierFiles||[]).filter(f => {
+    if (!f) return false;
     if ((localUser?.isAdmin || localUser?.level >= 6) || localUser.level >= 4) return true;
     if (f.accessLevel && f.accessLevel > localUser.level) return false;
-    const parentDossier = userDossiers.find(d => d.id === f.dossierId);
+    const parentDossier = userDossiers.find(d => d && d.id === f.dossierId);
     return !!parentDossier || f.uploadedBy === localUser.id;
   });
   const allDocs = [
