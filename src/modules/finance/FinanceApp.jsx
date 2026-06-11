@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // FinanceApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet, dsWipeKey } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet, dsWipeKey, gcClearAllLocalFiles } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
@@ -2218,13 +2218,17 @@ export default function App() {
     const sharedKeysToWipe = [
       "gc-sirh-presences", "gc-sirh-leaves", "gc-sirh-recrutements", "gc-sirh-evaluations",
       "gc-paie-transferts", "gc-internal-docs", "gc-external-docs", "gc-dossier-files",
+      "gc-si-docs", "gc-docs-unified", "gc-standalone-docs",
       "gc-messages-global", "gc-courrier-docs", "gc-session-logs", "gc-account-actions",
       "gc-error-log", "gc-pending-connections", "gc-app-habilitations", "gc-app-access-codes",
       "gc-codif-registry", "gc-kanban-cols-v2", "gc-kanban-cards-v2", "gc-notes-rapides",
       "gc-notepad-v2", "gc-memos", "gc-tableur-pro", "gc-alarms-v2", "gc-widget-alarms",
-      "gc-demandes", "gc-archives", "gc-standalone-docs", "gc-security-alerts", "gc-system-msgs",
+      "gc-demandes", "gc-archives", "gc-security-alerts", "gc-system-msgs",
     ];
-    await Promise.allSettled(sharedKeysToWipe.map(k => dsWipeKey(k).catch(() => {})));
+    await Promise.allSettled([
+      ...sharedKeysToWipe.map(k => dsWipeKey(k).catch(() => {})),
+      gcClearAllLocalFiles().catch(() => {}),
+    ]);
     // -- Badges "vu" sidebar (tous utilisateurs) --
     // FIX v92 Bug#7 — Snapshot complet des clés AVANT suppression (évite décalage d'index)
     try {

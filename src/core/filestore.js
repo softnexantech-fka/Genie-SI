@@ -448,6 +448,18 @@ export async function gcFileDeleteLocal(fileId) {
   return true;
 }
 
+export async function gcClearAllLocalFiles() {
+  const db = await openIDB();
+  if (!db) return false;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction([IDB_STORE], 'readwrite');
+      tx.objectStore(IDB_STORE).clear().onsuccess = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    } catch { resolve(false); }
+  });
+}
+
 /**
  * Lister les fichiers d'un dossier
  */

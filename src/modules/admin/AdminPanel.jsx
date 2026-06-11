@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // AdminPanel.jsx — SI Génie Consultant v127
-import { _lsSet, _lsRm, _lsGet, _noop, playSound, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, gcFileSave, _activeUser, gcViewDoc, getProcColor, gcHashPassword, gcReadFile, gcFmtSize, gcDownloadDoc, dsSave, dsWipeKey } from '../../core/index.js';
+import { _lsSet, _lsRm, _lsGet, _noop, playSound, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, gcFileSave, _activeUser, gcViewDoc, getProcColor, gcHashPassword, gcReadFile, gcFmtSize, gcDownloadDoc, dsSave, dsWipeKey, gcClearAllLocalFiles } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { STATUS_CONFIG, DOC_CATEGORIES, ACCOUNT_STATUS_CONFIG, CODES, getCatInfo } from '../../core/constants.js'; // FIX v132 — getCatInfo importée
@@ -1222,7 +1222,8 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
                          ["gc-sirh-presences","gc-sirh-leaves","gc-leaves","gc-sirh-recrutements","gc-recrutements","gc-paie-transferts","gc-sirh-evaluations","gc-sirh-fichiers","gc-sirh-reinstatements","gc-sirh-onboarding","gc-paie-taux"].forEach(k=>ops.push(_wipe(k)));
                        }
                        if(resetOptions.docs){
-                         ["gc-internal-docs","gc-external-docs","gc-dossier-files","gc-docs-unified","gc-standalone-docs","gc-docs-archives","gc-ohada-docs","gc-docs-templates","standaloneDocuments","gc-writer-docs","gc-writer-pro-v2","gc-tableur-pro","gc-pres-decks-v2","gc-courrier-docs"].forEach(k=>ops.push(_wipe(k)));
+                         ["gc-internal-docs","gc-external-docs","gc-dossier-files","gc-docs-unified","gc-standalone-docs","gc-si-docs","gc-docs-archives","gc-ohada-docs","gc-docs-templates","standaloneDocuments","gc-writer-docs","gc-writer-pro-v2","gc-tableur-pro","gc-pres-decks-v2","gc-courrier-docs"].forEach(k=>ops.push(_wipe(k)));
+                        ops.push(gcClearAllLocalFiles().catch(()=>{}));
                        }
                        if(resetOptions.finance){
                          ["gc-journal","gc-journal-ohada","gc-budget","gc-budget-entries","gc-budget-rapide","gc-factures","gc-devis","gc-ohada-custom","gc-ohada-overrides","gc-piece-series","gc-paie-transferts"].forEach(k=>ops.push(_wipe(k)));

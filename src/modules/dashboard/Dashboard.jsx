@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // Dashboard.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsSave, _tActive, playSound, formatCFA, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, _activeUser, formatDateTime, getProcColor, LiveClock, gcDelaiStatut, daysLeft, dsSave, dsWipeKey } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsSave, _tActive, playSound, formatCFA, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, _activeUser, formatDateTime, getProcColor, LiveClock, gcDelaiStatut, daysLeft, dsSave, dsWipeKey, gcClearAllLocalFiles } from '../../core/index.js';
 import { STATUS_CONFIG, PRIORITY_CONFIG, INITIAL_PARTNERS, CODES, INITIAL_SYSTEM_MSGS } from '../../core/constants.js';
 import {Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, RotatingAlert, Badge, ProgressBar} from '../../components/UI.jsx';
 import { AIAssistant } from '../../components/AIAssistant.jsx';
@@ -55,6 +55,7 @@ export function Dashboard() {
     return       { text:"Bonsoir",         emoji:"🌆" };
   })();
   const [activeDashProc, setActiveDashProc] = React.useState(null); // null = tous les processus
+  const [dgViewMode, setDgViewMode] = React.useState('global'); // 'global' | 'mine'
   const myDossiers = dossiers.filter(d =>
     lvl >= 4 ? true : // Niv 4+ : vue totale
     lvl >= 3 ? (d.assignedTo === uid || d.createdBy === uid || d.submittedTo === uid || (d.collaborators||[]).includes(uid) || _dashProcs.includes(d.process)) :
@@ -468,40 +469,45 @@ export function Dashboard() {
       {k:"logistique",     l:"🚚 Logistique & Inventaires",        danger:false},
       {k:"comm",           l:"📢 Communication & Marketing",       danger:false},
     ];
-    // -- KPIs DG entièrement dynamiques et synchronisés ----------------------
-    const tauxReal5 = totalGlobal > 0 ? Math.round((caGlobal / totalGlobal) * 100) : 0;
-    // CA : préférer journal OHADA si disponible, sinon dossiers
-    const caAffiche  = caDisplay;        // synchronisé avec _journalRefresh
-    const caPortef   = caJournal > 0 ? caJournal : totalGlobal;
-    const tachesDGEnCours  = taches.filter(_tActive).length;
-    const tachesDGUrgentes = taches.filter(t => _tActive(t) && t.priority === "HAUTE").length;
-    const rdvsAujourdhui   = rdvs.filter(r => r.date === new Date().toISOString().split("T")[0]).length;
+    // -- KPIs DG : sources filtrées selon le mode de vue -------------------------
+    const _dgDoss  = dgViewMode === 'mine' ? dossiers.filter(d => d.createdBy === uid || d.assignedTo === uid || (d.collaborators||[]).includes(uid)) : dossiers;
+    const _dgTaches = dgViewMode === 'mine' ? taches.filter(t => t.assignedTo === uid || t.assigneeId === uid || t.createdBy === uid) : taches;
+    const _dgRdvs  = dgViewMode === 'mine' ? rdvs.filter(r => r.assignedTo === uid || r.createdBy === uid) : rdvs;
+    const _dgTotal = _dgDoss.reduce((a, d) => a + (d.amount || 0), 0);
+    const _dgCA    = _dgDoss.filter(d => d.status === "TERMINE").reduce((a, d) => a + (d.amount || 0), 0);
+    const tauxReal5 = _dgTotal > 0 ? Math.round((_dgCA / _dgTotal) * 100) : 0;
+    const caPortef  = dgViewMode === 'mine' ? _dgTotal : (caJournal > 0 ? caJournal : totalGlobal);
+    const caAffiche = dgViewMode === 'mine' ? _dgCA    : caDisplay;
+    const tachesDGEnCours  = _dgTaches.filter(_tActive).length;
+    const tachesDGUrgentes = _dgTaches.filter(t => _tActive(t) && t.priority === "HAUTE").length;
+    const rdvsAujourdhui   = _dgRdvs.filter(r => r.date === new Date().toISOString().split("T")[0]).length;
     const collabsActifs    = users.filter(u => _activeUser(u)&&(u.isActive !== false) && !u.isAdmin && (u.accountStatus||"ACTIF")==="ACTIF").length;
+    const _dgUrgents = _dgDoss.filter(d => d.priority === "HAUTE" && d.status !== "TERMINE").length;
     const kpis = [
       {
         label: "Dossiers actifs", key: "dossiers", icon: "📁", color: "#3B82F6",
-        value: dossiers.filter(d => !["TERMINE","ARCHIVE"].includes(d.status)).length,
-        sub: `${dossiers.filter(d=>d.status==="EN_COURS").length} en cours · ${dossiers.filter(d=>d.dueDate&&d.dueDate<new Date().toISOString().split("T")[0]&&!["TERMINE","ARCHIVE"].includes(d.status)).length} en retard`},
+        value: _dgDoss.filter(d => !["TERMINE","ARCHIVE"].includes(d.status)).length,
+        sub: `${_dgDoss.filter(d=>d.status==="EN_COURS").length} en cours · ${_dgDoss.filter(d=>d.dueDate&&d.dueDate<new Date().toISOString().split("T")[0]&&!["TERMINE","ARCHIVE"].includes(d.status)).length} en retard`},
       {
         label: "CA Portefeuille", key: "ca", icon: "💰", color: "#C9A84C",
         value: `${(caPortef/1000000).toFixed(2)}M`,
-        sub: caJournal > 0 ? "OHADA" : "Dossiers"},
+        sub: dgViewMode === 'mine' ? "Mes dossiers" : (caJournal > 0 ? "OHADA" : "Dossiers")},
       {
         label: "CA Réalisé", key: "ca_realise", icon: "✅", color: "#22C55E",
         value: `${(caAffiche/1000000).toFixed(2)}M`,
         sub: `Taux ${tauxReal5}%`},
       {
         label: "Urgents", key: "urgents", icon: "🚨",
-        color: urgents > 0 ? "#C41E3A" : "#22C55E",
-        value: urgents,
-        sub: urgents > 0 ? "⚠️ Priorité haute" : "✓ Aucun urgent"},
+        color: _dgUrgents > 0 ? "#C41E3A" : "#22C55E",
+        value: _dgUrgents,
+        sub: _dgUrgents > 0 ? "⚠️ Priorité haute" : "✓ Aucun urgent"},
       {
         label: "Approbations", key: "approvals", icon: "👤",
         color: pendingApprovals.length > 0 ? "#F59E0B" : "#22C55E",
         value: pendingApprovals.length,
         sub: pendingApprovals.length === 0 ? "Tout traité ✓" : "en attente"},
       {
-        label: "Collaborateurs", key: "users", icon: "👥", color: "#8B5CF6",
+        label: dgViewMode === 'mine' ? "Mes collabs" : "Collaborateurs", key: "users", icon: "👥", color: "#8B5CF6",
         value: collabsActifs,
         sub: `${users.length} comptes total`},
       {
@@ -531,6 +537,19 @@ export function Dashboard() {
         </div>
 
         <RotatingAlert alerts={alerts} setActiveModule={setActiveModule} T={T} />
+
+        {/* Toggle vue DG : activité globale vs mes propres travaux */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          {[
+            { key: 'global', label: '🌐 Activité globale', sub: 'Tous les collaborateurs' },
+            { key: 'mine',   label: '👤 Mes travaux',       sub: 'Mes dossiers & tâches' },
+          ].map(v => (
+            <button key={v.key} onClick={() => setDgViewMode(v.key)}
+              style={{ flex: 1, padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 11, border: dgViewMode === v.key ? "2px solid #C9A84C" : `1px solid ${T.border}`, background: dgViewMode === v.key ? "#C9A84C22" : T.surface2, color: dgViewMode === v.key ? "#C9A84C" : T.textMuted, transition: "all 0.15s" }}>
+              {v.label}<br /><span style={{ fontSize: 9, fontWeight: 400, opacity: 0.7 }}>{v.sub}</span>
+            </button>
+          ))}
+        </div>
 
         {/* KPIs modernes DG — 7 cards cliquables */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8, marginBottom: 14 }} className="gc-stagger">
@@ -571,9 +590,9 @@ export function Dashboard() {
         {dgFloating && (() => {
           const kpi = kpis.find(k => k.key === dgFloating);
           let details = [];
-          if (dgFloating === "dossiers") details = dossiers.filter(d => d.status !== "TERMINE").map(d => ({ label: d.client, sub: `${d.ref} — J-${Math.max(0, daysLeft(d.dueDate))}`, color: STATUS_CONFIG[d.status]?.color || "#3B82F6", extra: `${d.progress}%` }));
-          if (dgFloating === "ca" || dgFloating === "ca_realise") details = Object.keys(CODES.processes).map(p => { const pd = dossiers.filter(d => d.process === p); const ca = pd.reduce((a,d) => a+(d.amount||0), 0); return ca > 0 ? { label: `${p} — ${CODES.processes[p]}`, sub: `${pd.length} dossier(s)`, color: "#C9A84C", extra: formatCFA(ca) } : null; }).filter(Boolean);
-          if (dgFloating === "urgents") details = dossiers.filter(d => d.priority === "HAUTE" && d.status !== "TERMINE").map(d => ({ label: d.client, sub: d.ref, color: "#C41E3A", extra: `J-${daysLeft(d.dueDate)}` }));
+          if (dgFloating === "dossiers") details = _dgDoss.filter(d => d.status !== "TERMINE").map(d => ({ label: d.client, sub: `${d.ref} — J-${Math.max(0, daysLeft(d.dueDate))}`, color: STATUS_CONFIG[d.status]?.color || "#3B82F6", extra: `${d.progress}%` }));
+          if (dgFloating === "ca" || dgFloating === "ca_realise") details = Object.keys(CODES.processes).map(p => { const pd = _dgDoss.filter(d => d.process === p); const ca = pd.reduce((a,d) => a+(d.amount||0), 0); return ca > 0 ? { label: `${p} — ${CODES.processes[p]}`, sub: `${pd.length} dossier(s)`, color: "#C9A84C", extra: formatCFA(ca) } : null; }).filter(Boolean);
+          if (dgFloating === "urgents") details = _dgDoss.filter(d => d.priority === "HAUTE" && d.status !== "TERMINE").map(d => ({ label: d.client, sub: d.ref, color: "#C41E3A", extra: `J-${daysLeft(d.dueDate)}` }));
           if (dgFloating === "approvals") details = pendingApprovals.map(a => ({ label: a.applicant||a.userName||"—", sub: a.function||a.userRole||"—", color: "#A855F7", extra: a.status }));
           // FIX v63: nouvelles clés users et taches
           if (dgFloating === "users") details = users.filter(u=>_activeUser(u)&&!u.isAdmin&&u.isActive!==false).sort((a,b)=>(b.level||0)-(a.level||0)).map(u=>({ label:u.name, sub:`Niv.${u.level} · ${u.process||"—"}`, color:u.color||"#888", extra:u.role||"—" }));
@@ -1002,7 +1021,8 @@ export function Dashboard() {
                   if(selected.includes("documents")){
                     if(setInternalDocs) try{setInternalDocs([]);}catch(_){}
                     if(setExternalDocs) try{setExternalDocs([]);}catch(_){}
-                    ["gc-internal-docs","gc-external-docs","gc-standalone-docs","gc-docs-unified","gc-dossier-files","gc-docs-archives","standaloneDocuments","gc-writer-docs","gc-writer-pro-v2","gc-tableur-pro","gc-pres-decks-v2","gc-courrier-docs"].forEach(k=>ops.push(_wipe(k)));
+                    ["gc-internal-docs","gc-external-docs","gc-standalone-docs","gc-docs-unified","gc-si-docs","gc-dossier-files","gc-docs-archives","standaloneDocuments","gc-writer-docs","gc-writer-pro-v2","gc-tableur-pro","gc-pres-decks-v2","gc-courrier-docs"].forEach(k=>ops.push(_wipe(k)));
+                    ops.push(gcClearAllLocalFiles().catch(()=>{}));
                   }
                   if(selected.includes("demandes")){
                     if(setDemandesData) try{setDemandesData([]);}catch(_){}

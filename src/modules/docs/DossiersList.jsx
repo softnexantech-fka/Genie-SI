@@ -618,13 +618,9 @@ export const DossiersList = React.memo(function DossiersList() {
     setShowDeleteApproval(null); setDeleteMotif(""); playSound("message");
   };
 
-  const handleApproveDelete = (req) => {
-    setDossiers(prev => {
-      const updated = prev.filter(x=>x.id!==req.dossierId);
-      // Sauvegarder en base de données pour synchronisation
-      dsSave("dossiers", updated, localUser.id);
-      return updated;
-    });
+  const handleApproveDelete = async (req) => {
+    await dsDeleteItemFromArray("dossiers", req.dossierId, localUser.id);
+    setDossiers(prev => prev.filter(x => x.id !== req.dossierId));
     saveDossierFiles(prev=>prev.filter(f=>f.dossierId!==req.dossierId));
     savePendingDeleteApprovals(prev=>prev.map(r=>r.id===req.id?{...r,status:"APPROUVE",approvedAt:new Date().toISOString(),approvedBy:localUser.id}:r));
     window.dispatchEvent(new CustomEvent('gc:dossier-deleted', { detail: { id: req.dossierId, ref: req.dossierRef, client: req.dossierClient } }));
