@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // AdminPanel.jsx — SI Génie Consultant v127
-import { _lsSet, _lsRm, _lsGet, _noop, playSound, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, gcFileSave, _activeUser, gcViewDoc, getProcColor, gcHashPassword, gcReadFile, gcFmtSize, gcDownloadDoc, dsSave } from '../../core/index.js';
+import { _lsSet, _lsRm, _lsGet, _noop, playSound, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, gcFileSave, _activeUser, gcViewDoc, getProcColor, gcHashPassword, gcReadFile, gcFmtSize, gcDownloadDoc, dsSave, dsWipeKey } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { gcToast } from '../../components/ToastManager.jsx';
 import { STATUS_CONFIG, DOC_CATEGORIES, ACCOUNT_STATUS_CONFIG, CODES, getCatInfo } from '../../core/constants.js'; // FIX v132 — getCatInfo importée
@@ -1187,13 +1187,10 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
                        const labels={dossiers:"Dossiers",taches:"Tâches",rdvs:"RDV",partners:"Partenaires",approvals:"Approbations",connections:"Connexions",sirh:"SIRH",docs:"Documents",sessionLogs:"Journaux",achats:"Achats/Stocks",notifications:"Notifications",finance:"Finance & Comptabilité",audit:"Audit & Contrôle",logistique:"Logistique",comm:"Communication",users:"Comptes utilisateurs"};
                        if(!await gcConfirm(`⚠️ Confirmer la réinitialisation de :\n${selected.map(k=>"• "+(labels[k]||k)).join("\n")}\n\nCette action est IRRÉVERSIBLE et affectera TOUS les postes connectés.`,"Confirmation","🗑️",true))return;
 
-                       // Helper : vide une clé en LS + serveur (propagation cross-machine via broadcast)
-                       const _wipe = (key, val=[]) => {
-                         try { _lsSet(key, JSON.stringify(val)); } catch(_) {}
-                         // Vider aussi les timestamps TS pour forcer re-fetch sur tous les postes
-                         try { localStorage.removeItem('__ts__:' + key); localStorage.removeItem('__svts__:' + key); } catch(_) {}
-                         return dsSave(key, val, null, {forceOverwrite:true}).catch(()=>{});
-                       };
+                       // Helper : vide une clé définitivement — LS + wipe-registry + serveur forceOverwrite
+                       // dsWipeKey enregistre le wipe localement ET sur le serveur pour bloquer
+                       // la résurrection depuis les postes hors-ligne qui reviendraient plus tard.
+                       const _wipe = (key, val=[]) => dsWipeKey(key, val).catch(()=>{});
 
                        const ops = [];
 

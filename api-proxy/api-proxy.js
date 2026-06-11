@@ -1258,13 +1258,32 @@ io.on('connection', (socket) => {
   });
 });
 
+// ── WIPE REGISTRY — trace les resets volontaires pour bloquer la résurrection ──────────────────
+// Clé serveur : 'gc-wipe-registry' = { [dataKey]: wipeTimestamp }
+// Chargé en mémoire au démarrage, persisté en SQLite/JSON.
+let _wipeRegistry = {};
+(async () => {
+  try {
+    const saved = await dbGet('gc-wipe-registry');
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) _wipeRegistry = saved;
+  } catch (_) {}
+})();
+
+async function recordWipe(key, ts = Date.now()) {
+  _wipeRegistry[key] = ts;
+  try { await dbSet('gc-wipe-registry', _wipeRegistry); } catch (_) {}
+  // Broadcaster pour que tous les clients mettent à jour leur wipe-registry local
+  broadcast('data_changed', { key: 'gc-wipe-registry', action: 'set', ts }, null);
+}
+
+function getWipeTs(key) { return _wipeRegistry[key] || 0; }
+
 // FIX SYNC-HB — Heartbeat serveur toutes les 30s : broadcast 'heartbeat_sync' à tous les clients.
-// Garantit que même les clients passifs (sans activité WebSocket récente) restent synchronisés.
-// Chaque client invalide son cache local et re-fetch les données stales depuis le serveur.
+// On inclut maintenant la liste des clés à re-fetcher (wipe-registry inclus) pour une couverture totale.
 setInterval(() => {
   if (io.sockets.sockets.size === 0) return;
   const ts = Date.now();
-  io.emit('heartbeat_sync', { ts });
+  io.emit('heartbeat_sync', { ts, wipeRegistry: _wipeRegistry });
   // Log discret (toutes les 10 heartbeats = 5 min) pour éviter de noyer les logs
   if (Math.floor(ts / 30_000) % 10 === 0) {
     console.log(`[HB] Heartbeat sync → ${io.sockets.sockets.size} client(s) connecté(s)`);
@@ -1690,19 +1709,52 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     'gc-standalone-docs', 'gc-messages', 'gc-notifications',
   ]);
 
+  // AUTH GUARD — x-force-overwrite requiert niveau 4+ ou admin
+  const reqLevel = req.user?.level || 0;
+  const reqIsAdmin = req.user?.isAdmin || reqLevel >= 6;
+  if (req.headers['x-force-overwrite'] && !reqIsAdmin && reqLevel < 4) {
+    return res.status(403).json({ error: 'Niveau 4 minimum requis pour forceOverwrite' });
+  }
+
+  // WIPE REGISTRY — Si forceOverwrite + tableau vide (ou très réduit) : enregistrer le wipe
+  const isWipe = req.headers['x-force-overwrite'] && Array.isArray(sanitized) && sanitized.length === 0;
+  if (isWipe) {
+    await recordWipe(key);
+  }
+
+  // ANTI-RÉSURRECTION : si un wipe volontaire a été enregistré pour cette clé,
+  // et que le client envoie des données SANS forceOverwrite (client hors-ligne qui revient),
+  // on écrase sa valeur par [] pour respecter le reset intentionnel.
+  const wipeTs = getWipeTs(key);
   let finalValue = sanitized;
   if (
-    isArrayOfObjectsWithIds(sanitized) &&
+    wipeTs > 0 &&
+    !req.headers['x-force-overwrite'] &&
+    Array.isArray(sanitized) && sanitized.length > 0
+  ) {
+    const clientTs = Number(req.headers['x-client-ts'] || req.headers['x-write-ts'] || 0);
+    if (clientTs === 0 || clientTs < wipeTs) {
+      // Données du client antérieures au wipe → respecter le reset, ignorer les données entrantes
+      finalValue = [];
+    }
+  }
+
+  if (
+    isArrayOfObjectsWithIds(finalValue) &&
     !req.headers['x-force-overwrite']
   ) {
     try {
       const existing = await dbGet(key);
       // Pour MERGE_ALWAYS_KEYS : union-merge dès qu'il y a des données existantes (pas de seuil %)
       // Pour les autres : seuil < 70% (défensif)
+      // Si finalValue est [] suite à l'anti-résurrection → pas de merge, on respecte le wipe
+      if (finalValue.length === 0) {
+        // pas de merge nécessaire, finalValue reste []
+      } else {
       const shouldMerge = Array.isArray(existing) && existing.length >= 2 && (
         MERGE_ALWAYS_KEYS.has(key)
           ? true  // union-merge systématique pour clés métier
-          : sanitized.length < existing.length * 0.7
+          : finalValue.length < existing.length * 0.7
       );
       if (shouldMerge) {
         const incomingIds = new Set(sanitized.map(item => item?.id).filter(Boolean));
@@ -1749,7 +1801,8 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
             req.ip
           );
         }
-      }
+      } // end if shouldMerge
+      } // end else (finalValue.length > 0)
     } catch (mergeErr) {
       console.warn('[ANTI-REGRESSION] Erreur lecture pour merge:', mergeErr.message);
       // En cas d'erreur de lecture → continuer avec la valeur envoyée (fail-open)

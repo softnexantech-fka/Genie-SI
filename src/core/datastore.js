@@ -333,7 +333,26 @@ const REGRESSION_KEYS = new Set([
 function isArrayOfObjectsWithIds(value) {
   return Array.isArray(value) && value.length > 0 && value.every(item => item && typeof item === 'object' && (typeof item.id === 'string' || typeof item.id === 'number'));
 }
+// ── Wipe registry client — anti-résurrection pour les resets volontaires ─────
+// Reçu via heartbeat_sync et data_changed(gc-wipe-registry).
+// Persisté en localStorage pour survivre aux rechargements.
+let _wipeRegistry = (() => {
+  try { return JSON.parse(localStorage.getItem('__gc_wipe_registry__') || '{}'); } catch (_) { return {}; }
+})();
+
+function _updateWipeRegistry(reg) {
+  if (!reg || typeof reg !== 'object') return;
+  _wipeRegistry = { ..._wipeRegistry, ...reg };
+  try { localStorage.setItem('__gc_wipe_registry__', JSON.stringify(_wipeRegistry)); } catch (_) {}
+}
+
+function _getWipeTs(key) { return _wipeRegistry[key] || 0; }
+
 function shouldProtectAgainstRegression(key, value) {
+  // Si un wipe a été enregistré pour cette clé, la donnée locale ne doit JAMAIS écraser
+  // la valeur vidée — même avec forceOverwrite depuis un autre poste.
+  // (Le contrôle inverse — anti-résurrection depuis un client hors-ligne — est géré côté serveur.)
+  if (_getWipeTs(key) > 0 && Array.isArray(value) && value.length > 0) return true;
   return REGRESSION_KEYS.has(key) || (isSharedKey(key) && isArrayOfObjectsWithIds(value));
 }
 
@@ -597,6 +616,13 @@ async function initWebSocket() {
         } catch {}
       }
 
+      // Quand gc-wipe-registry change → mettre à jour le registre local des wipes
+      if (key === 'gc-wipe-registry') {
+        dsGet('gc-wipe-registry', {}).then(reg => {
+          if (reg && typeof reg === 'object') _updateWipeRegistry(reg);
+        }).catch(() => {});
+      }
+
       // Quand gc-tombstones change sur le serveur (suppression depuis une autre machine),
       // re-fetcher pour mettre à jour le localStorage local.
       if (key === TOMBSTONE_LS_KEY) {
@@ -771,15 +797,20 @@ async function initWebSocket() {
     // FIX SYNC-HB — Heartbeat serveur toutes les 30s → invalider cache + notifier hooks
     // Le serveur broadcast 'heartbeat_sync' à tous les clients connectés pour s'assurer
     // que même les clients passifs (sans activité récente) aient des données à jour.
-    _socket.on('heartbeat_sync', ({ ts, keys: hbKeys } = {}) => {
+    // Le heartbeat inclut maintenant wipeRegistry pour propager les resets volontaires.
+    _socket.on('heartbeat_sync', ({ ts, keys: hbKeys, wipeRegistry } = {}) => {
+      // Appliquer le wipe registry reçu du serveur
+      if (wipeRegistry && typeof wipeRegistry === 'object') {
+        _updateWipeRegistry(wipeRegistry);
+      }
       const keysToInvalidate = Array.isArray(hbKeys) && hbKeys.length ? hbKeys : [...SHARED_KEYS];
       keysToInvalidate.forEach(k => { _cache.delete(k); _pendingFetches.delete(k); });
       _syncListeners.forEach(fn => {
         try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: ts || Date.now() }); } catch {}
       });
-      // Aussi dispatcher des StorageEvents pour useRemoteSync (écoute 'storage')
-      const critical = ['dossiers','taches','rdvs','partners','users','gc-dossier-files','gc-docs-unified','gc-notifications','gc-messages-global','gc-session-logs','gc-app-habilitations'];
-      critical.forEach(k => {
+      // Dispatcher des StorageEvents pour useRemoteSync (écoute 'storage')
+      // Couvre toutes les SHARED_KEYS pour garantir que tous les composants se rafraîchissent
+      keysToInvalidate.forEach(k => {
         try { window.dispatchEvent(new StorageEvent('storage', { key: `__GC__${k}`, newValue: JSON.stringify({ ts: ts || Date.now(), action: 'heartbeat' }) })); } catch {}
       });
     });
@@ -1204,8 +1235,12 @@ export async function dsSave(key, value, userId = null, options = {}) {
     }
   }
 
-  // Transmettre forceOverwrite au serveur via header pour court-circuiter l'anti-régression côté serveur
-  const extraHeaders = options.forceOverwrite ? { 'x-force-overwrite': '1' } : {};
+  // Transmettre forceOverwrite au serveur + timestamp local pour anti-résurrection
+  const writeTs = _lsGet('__ts__:' + key) || String(Date.now());
+  const extraHeaders = {
+    ...(options.forceOverwrite ? { 'x-force-overwrite': '1' } : {}),
+    'x-client-ts': writeTs,
+  };
   try {
     const r = await fetch(`${getProxyUrl()}/api/data/${encodeURIComponent(key)}`, {
       method:  'POST',
@@ -1332,11 +1367,32 @@ export async function gcSyncAuthUsers() {
   }
 }
 
+/**
+ * dsWipeKey(key) — Vide une clé définitivement : LS + timestamps + serveur avec forceOverwrite.
+ * Enregistre le wipe dans le registre local immédiatement (avant confirm serveur) pour bloquer
+ * l'anti-régression locale, puis met à jour gc-wipe-registry sur le serveur.
+ */
+export async function dsWipeKey(key, val = []) {
+  const ts = Date.now();
+  // 1. Enregistrer le wipe localement immédiatement
+  _updateWipeRegistry({ [key]: ts });
+  // 2. Vider LS + timestamps
+  try { localStorage.setItem(`GC_SI_v12:${key}`, JSON.stringify(val)); } catch (_) {}
+  try { localStorage.removeItem(`__ts__:${key}`); localStorage.removeItem(`__svts__:${key}`); } catch (_) {}
+  _cache.delete(key);
+  _pendingFetches.delete(key);
+  // 3. Pousser au serveur avec forceOverwrite
+  const p1 = dsSave(key, val, null, { forceOverwrite: true });
+  // 4. Mettre à jour gc-wipe-registry sur le serveur
+  const p2 = dsSave('gc-wipe-registry', _wipeRegistry, null, { forceOverwrite: true });
+  return Promise.allSettled([p1, p2]);
+}
+
 export default {
   dsProxyAvailable, dsOfflineQueueSize,
   dsInitSync, dsOnSync, dsStartSync,
   dsLoad, dsGet, dsSave, dsSet: dsSave, dsDelete,
   dsMarkDeleted, dsDeleteItem, dsDeleteItemFromArray, dsClearTombstones, dsSaveUsersWithPrune,
-  gcSyncAuthUsers,
+  gcSyncAuthUsers, dsWipeKey,
   SHARED_KEYS, getJWTToken, getRequestHeaders, getProxyUrl,
 };

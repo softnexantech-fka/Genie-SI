@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDialog } from '../../components/Dialog.jsx';
 // Dashboard.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsSave, _tActive, playSound, formatCFA, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, _activeUser, formatDateTime, getProcColor, LiveClock, gcDelaiStatut, daysLeft , dsSave } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsSave, _tActive, playSound, formatCFA, formatDate, gcGetDelaiConfig, generateAccessCode, useSI, _activeUser, formatDateTime, getProcColor, LiveClock, gcDelaiStatut, daysLeft, dsSave, dsWipeKey } from '../../core/index.js';
 import { STATUS_CONFIG, PRIORITY_CONFIG, INITIAL_PARTNERS, CODES, INITIAL_SYSTEM_MSGS } from '../../core/constants.js';
 import {Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner, RotatingAlert, Badge, ProgressBar} from '../../components/UI.jsx';
 import { AIAssistant } from '../../components/AIAssistant.jsx';
@@ -960,12 +960,8 @@ export function Dashboard() {
                   const confirmMsg = `Confirmer la réinitialisation de :\n${DG_RESET_ITEMS.filter(i=>selected.includes(i.k)).map(i=>"\n• "+i.l).join("")}\n\nCette action est IRRÉVERSIBLE et affectera TOUS les postes connectés.`;
                   if (!await gcConfirm(confirmMsg,"Confirmer la réinitialisation","⚠️",true)) return;
 
-                  // Helper : vide une clé en LS + serveur (propagation cross-machine)
-                  const _wipe = (key, val=[]) => {
-                    try { _lsSet(key, JSON.stringify(val)); } catch(_) {}
-                    try { localStorage.removeItem('__ts__:'+key); localStorage.removeItem('__svts__:'+key); } catch(_) {}
-                    return dsSave(key, val, null, {forceOverwrite:true}).catch(()=>{});
-                  };
+                  // Helper : vide définitivement avec wipe-registry (anti-résurrection cross-machine)
+                  const _wipe = (key, val=[]) => dsWipeKey(key, val).catch(()=>{});
                   const ops = [];
 
                   if(selected.includes("dossiers")){
