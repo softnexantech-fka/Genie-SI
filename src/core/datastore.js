@@ -1377,7 +1377,7 @@ export async function dsWipeKey(key, val = []) {
   // 1. Enregistrer le wipe localement immédiatement
   _updateWipeRegistry({ [key]: ts });
   // 2. Vider LS + timestamps
-  try { localStorage.setItem(`GC_SI_v12:${key}`, JSON.stringify(val)); } catch (_) {}
+  try { lsSave(key, val); } catch (_) {}
   try { localStorage.removeItem(`__ts__:${key}`); localStorage.removeItem(`__svts__:${key}`); } catch (_) {}
   _cache.delete(key);
   _pendingFetches.delete(key);

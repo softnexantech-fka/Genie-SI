@@ -9,7 +9,7 @@ import {
   _gcProxyFetch,
   _gcEncrypt, _lsGetSecure, _lsSetSecure,
   _migrateDGAccount, _checkSchemaVersion, _migrateLS, SIErrorBoundary,
-  gcMigrateFilesFromLS, gcSyncFilesToServer, gcFileStats, dsInitSync, dsStartSync, dsOnSync, dsSave, dsLoad, dsGet, dsClearTombstones,
+  gcMigrateFilesFromLS, gcSyncFilesToServer, gcFileStats, dsInitSync, dsStartSync, dsOnSync, dsSave, dsLoad, dsGet, dsClearTombstones, dsWipeKey,
   // FIX vSERVER-TIME — synchronisation heure serveur
   syncServerTime,
   // FIX v127 — fonctions IP centralisées
@@ -1685,10 +1685,14 @@ export default function App() {
       'gc-committees', 'gc-codif-registry', 'gc-process-config',
       'gc-messages-global', 'gc-presence', 'gc-tombstones',
     ];
+    // Utiliser dsWipeKey pour les clés critiques : enregistre dans wipe-registry pour
+    // bloquer la résurrection depuis les postes hors-ligne qui reviendraient plus tard.
+    const wipeOps = [];
     for (const k of extraResetKeys) {
-      try { _lsRm(k); } catch (_) {}
-      syncPromises.push(dsSave(k, [], null, { forceOverwrite: true }).catch(() => {}));
+      wipeOps.push(dsWipeKey(k).catch(() => {}));
     }
+    // Synchroniser aussi les clés déjà pushées plus haut via syncPromises (si défini)
+    const syncPromises = wipeOps;
 
     try { dsClearTombstones(); } catch (_) {}
 
