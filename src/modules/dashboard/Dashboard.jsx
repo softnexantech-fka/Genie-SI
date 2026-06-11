@@ -957,103 +957,90 @@ export function Dashboard() {
                 <button onClick={async ()=>{
                   const selected = Object.entries(dgResetItems).filter(([_k,v])=>v).map(([k])=>k);
                   if (selected.length===0) { gcAlert("Sélectionnez au moins un élément."); return; }
-                  const confirmMsg = `Confirmer la réinitialisation de :
-${DG_RESET_ITEMS.filter(i=>selected.includes(i.k)).map(i=>"\n• "+i.l).join("")}
-
-Cette action est irréversible.`;
+                  const confirmMsg = `Confirmer la réinitialisation de :\n${DG_RESET_ITEMS.filter(i=>selected.includes(i.k)).map(i=>"\n• "+i.l).join("")}\n\nCette action est IRRÉVERSIBLE et affectera TOUS les postes connectés.`;
                   if (!await gcConfirm(confirmMsg,"Confirmer la réinitialisation","⚠️",true)) return;
 
-                  // -- Dossiers --
+                  // Helper : vide une clé en LS + serveur (propagation cross-machine)
+                  const _wipe = (key, val=[]) => {
+                    try { _lsSet(key, JSON.stringify(val)); } catch(_) {}
+                    try { localStorage.removeItem('__ts__:'+key); localStorage.removeItem('__svts__:'+key); } catch(_) {}
+                    return dsSave(key, val, null, {forceOverwrite:true}).catch(()=>{});
+                  };
+                  const ops = [];
+
                   if(selected.includes("dossiers")){
                     setDossiers([]);
-                    // Vider aussi les fichiers dossiers
-                    try{_lsRm("gc-dossier-files");}catch(_){}
                     if(saveDossierFiles) try{saveDossierFiles([]);}catch(_){}
+                    ops.push(_wipe('dossiers'), _wipe('gc-dossiers'), _wipe('gc-dossier-files'), _wipe('gc-pending-delete-approvals'));
                   }
-                  // -- Tâches --
                   if(selected.includes("taches")){
                     setTaches([]);
+                    ops.push(_wipe('taches'), _wipe('gc-taches'));
                   }
-                  // -- Agendas --
                   if(selected.includes("rdvs")){
                     setRdvs([]);
+                    ops.push(_wipe('rdvs'), _wipe('gc-rdvs'));
                   }
-                  // -- Partenaires (réinitialiser à la liste par défaut) --
                   if(selected.includes("partners")){
                     setPartnersSync(INITIAL_PARTNERS);
+                    ops.push(_wipe('partners', INITIAL_PARTNERS), _wipe('gc-crm-clients', INITIAL_PARTNERS), _wipe('gc-crm-interactions'), _wipe('gc-crm-opps'), _wipe('gc-crm-relances'));
                   }
-                  // -- SIRH complet --
                   if(selected.includes("sirh")){
-                    try{
-                      ["gc-sirh-presences","gc-sirh-leaves","gc-sirh-recrutements",
-                       "gc-sirh-evaluations","gc-paie-transferts"].forEach(k=>_lsRm(k));
-                    }catch(_){}
+                    ["gc-sirh-presences","gc-sirh-leaves","gc-leaves","gc-sirh-recrutements","gc-recrutements","gc-sirh-evaluations","gc-paie-transferts","gc-sirh-fichiers","gc-sirh-reinstatements","gc-sirh-onboarding","gc-paie-taux"].forEach(k=>ops.push(_wipe(k)));
                   }
-                  // -- Approbations --
                   if(selected.includes("approvals")){
                     setPendingApprovals([]);
+                    ops.push(_wipe('pendingApprovals'), _wipe('gc-pending-approvals'), _wipe('gc-pending-delete-approvals'));
                   }
-                  // -- Messages & courrier --
                   if(selected.includes("messages")){
-                    try{_lsRm("gc-messages-global");}catch(_){}
-                    try{_lsRm("gc-courrier-docs");}catch(_){}
+                    ops.push(_wipe('gc-messages-global'), _wipe('gc-courrier-docs'), _wipe('gc-msg-drafts'), _wipe('gc-msg-templates'));
                   }
-                  // -- Codification --
                   if(selected.includes("codification")){
-                    try{_lsSet("gc-codif-registry","[]"); dsSave("gc-codif-registry",[]).catch(err => gcToast.syncError('', err)); setCodifRegistry([]);}catch(_){}
+                    if(setCodifRegistry) setCodifRegistry([]);
+                    ops.push(_wipe('gc-codif-registry'));
                   }
-                  // -- Messages système / Infos complémentaires --
                   if(selected.includes("infos_comp")){
                     setSystemMsgs(INITIAL_SYSTEM_MSGS);
-                    try { _lsRm("gc-system-msgs"); } catch(_) {}  // FIX v72
+                    ops.push(_wipe('gc-system-msgs', INITIAL_SYSTEM_MSGS));
                   }
-                  // -- Documents internes & externes --
                   if(selected.includes("documents")){
                     if(setInternalDocs) try{setInternalDocs([]);}catch(_){}
                     if(setExternalDocs) try{setExternalDocs([]);}catch(_){}
-                    try{_lsRm("gc-internal-docs");}catch(_){}
-                    try{_lsRm("gc-external-docs");}catch(_){}
-                    try{_lsRm("gc-standalone-docs");}catch(_){}
+                    ["gc-internal-docs","gc-external-docs","gc-standalone-docs","gc-docs-unified","gc-dossier-files","gc-docs-archives","standaloneDocuments","gc-writer-docs","gc-writer-pro-v2","gc-tableur-pro","gc-pres-decks-v2","gc-courrier-docs"].forEach(k=>ops.push(_wipe(k)));
                   }
-                  // -- Demandes collaborateurs --
                   if(selected.includes("demandes")){
                     if(setDemandesData) try{setDemandesData([]);}catch(_){}
-                    try{_lsRm("gc-demandes");}catch(_){}
+                    ops.push(_wipe('gc-demandes'));
                   }
-                  // -- Kanban & Notes rapides --
                   if(selected.includes("kanban_notes")){
-                    try{_lsRm("gc-kanban-cols-v2");}catch(_){}
-                    try{_lsRm("gc-kanban-cards-v2");}catch(_){}
-                    try{_lsRm("gc-notes-rapides");}catch(_){}
-                    try{_lsRm("gc-notepad-v2");}catch(_){}
-                    try{_lsRm("gc-memos");}catch(_){}
+                    ["gc-kanban-cols-v2","gc-kanban-cards-v2","gc-notes-rapides","gc-notepad-v2","gc-memos"].forEach(k=>ops.push(_wipe(k)));
                   }
-                  // -- Registre d'archivage --
                   if(selected.includes("archives")){
-                    try{_lsRm("gc-archives");}catch(_){}
+                    ops.push(_wipe('gc-archives'), _wipe('gc-docs-archives'));
                   }
-                  // -- Finance & Comptabilité --
                   if(selected.includes("finance")){
-                    try{["gc-journal-ohada","gc-budget-entries","gc-ohada-custom","gc-ohada-overrides","gc-piece-series"].forEach(k=>_lsRm(k));}catch(_){}
+                    ["gc-journal","gc-journal-ohada","gc-budget","gc-budget-entries","gc-budget-rapide","gc-ohada-custom","gc-ohada-overrides","gc-piece-series","gc-factures","gc-devis"].forEach(k=>ops.push(_wipe(k)));
                   }
-                  // -- Audit & Contrôle --
                   if(selected.includes("audit")){
-                    try{["gc-tpa","gc-audit-prog","gc-feuille-tests","gc-audit-actions","gc-audit-checklist","gc-audit-checklist-custom","gc-audit-grille-taches","gc-pca-risques","gc-pca-procedures","gc-pca-tests","gc-coso-scores"].forEach(k=>_lsRm(k));}catch(_){}
+                    ["gc-tpa","gc-audit-prog","gc-feuille-tests","gc-audit-actions","gc-audit-checklist","gc-audit-checklist-custom","gc-audit-grille-taches","gc-pca","gc-pca-risques","gc-pca-procedures","gc-pca-tests","gc-coso-scores","gc-risks","gc-nc","gc-obligations","gc-amelio-actions","gc-amelio-kpis","gc-amelio-ncs"].forEach(k=>ops.push(_wipe(k)));
                   }
-                  // -- Logistique & Inventaires --
                   if(selected.includes("logistique")){
-                    try{["gc-achats","gc-logmod-stocks","gc-logistique-actifs","gc-inventaires","gc-inventaire-en-cours"].forEach(k=>_lsRm(k));}catch(_){}
+                    ["gc-achats","gc-stocks","gc-logmod-stocks","gc-logistique-actifs","gc-inventaires","gc-inventaire-en-cours","gc-resources"].forEach(k=>ops.push(_wipe(k)));
                   }
-                  // -- Communication --
                   if(selected.includes("comm")){
-                    try{["gc-comm-campagnes","gc-comm-contacts","gc-comm-fiches","gc-comm-custom-tpl"].forEach(k=>_lsRm(k));}catch(_){}
+                    ["gc-comm-campagnes","gc-comm-contacts","gc-comm-fiches","gc-comm-custom-tpl"].forEach(k=>ops.push(_wipe(k)));
                   }
 
-                  setNotifications(p=>[{id:"N"+Date.now(),icon:"⚙️",message:`Réinitialisation partielle DG effectuée : ${DG_RESET_ITEMS.filter(i=>selected.includes(i.k)).map(i=>i.l).join(", ")}`,at:new Date().toISOString(),read:false},...p]);
+                  await Promise.allSettled(ops);
+                  // Forcer resync sur tous les postes via événement global
+                  try { window.dispatchEvent(new CustomEvent('gc-resync-all')); } catch(_) {}
+
+                  setNotifications(p=>[{id:"N"+Date.now(),icon:"⚙️",message:`Réinitialisation DG effectuée (tous postes) : ${DG_RESET_ITEMS.filter(i=>selected.includes(i.k)).map(i=>i.l).join(", ")}`,at:new Date().toISOString(),read:false},...p]);
                   playSound("success");
                   setShowDgReset(false);
                   setDgResetItems({});
-                  gcAlert("✅ Réinitialisation effectuée avec succès.");
+                  gcAlert("✅ Réinitialisation effectuée sur TOUS les postes connectés. Actualisation dans 3s…");
+                  setTimeout(()=>window.location.reload(), 3000);
                 }} style={{flex:1,background:Object.values(dgResetItems).some(Boolean)?"#F59E0B":"#888",border:"none",color:"#fff",borderRadius:8,padding:"11px 16px",cursor:"pointer",fontWeight:800,fontSize:12}}>
                   ⚙️ Confirmer la réinitialisation
                 </button>

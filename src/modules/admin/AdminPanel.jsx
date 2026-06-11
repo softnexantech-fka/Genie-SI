@@ -1185,25 +1185,87 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
                        const selected=Object.entries(resetOptions).filter(([_k,v])=>v).map(([k])=>k);
                        if(!selected.length){gcAlert("Aucune option sélectionnée.");return;}
                        const labels={dossiers:"Dossiers",taches:"Tâches",rdvs:"RDV",partners:"Partenaires",approvals:"Approbations",connections:"Connexions",sirh:"SIRH",docs:"Documents",sessionLogs:"Journaux",achats:"Achats/Stocks",notifications:"Notifications",finance:"Finance & Comptabilité",audit:"Audit & Contrôle",logistique:"Logistique",comm:"Communication",users:"Comptes utilisateurs"};
-                       if(!await gcConfirm(`⚠️ Confirmer la réinitialisation de :\n${selected.map(k=>"• "+(labels[k]||k)).join("\n")}\n\nCette action est IRRÉVERSIBLE.`,"Confirmation","🗑️",true))return;
-                       if(resetOptions.dossiers){if(setDossiers)setDossiers([]);}
-                       if(resetOptions.taches){if(setTaches)setTaches([]);}
-                       if(resetOptions.rdvs){if(setRdvs)setRdvs([]);}
-                       if(resetOptions.partners){if(setPartnersSync)setPartnersSync([]);}
-                       if(resetOptions.approvals){if(setPendingApprovals)setPendingApprovals([]);}
-                       if(resetOptions.connections){try{_lsRm("gc-pending-connections");}catch (_) {}}
-                       if(resetOptions.sirh){["gc-sirh-presences","gc-sirh-leaves","gc-sirh-recrutements","gc-paie-transferts","gc-sirh-evaluations","gc-sirh-fichiers","gc-sirh-reinstatements","gc-sirh-onboarding"].forEach(k=>{try{_lsSet(k,"[]");}catch (_) {}});}
-                       if(resetOptions.docs){["gc-internal-docs","gc-external-docs","gc-dossier-files","gc-docs-unified","gc-docs-archives","gc-ohada-docs","gc-docs-templates"].forEach(k=>{try{_lsSet(k,"[]");}catch (_) {}});}
-                       if(resetOptions.finance){["gc-journal-ohada","gc-budget-entries","gc-ohada-custom","gc-ohada-overrides","gc-piece-series","gc-paie-transferts","gc-factures"].forEach(k=>{try{_lsSet(k,"[]");}catch (_) {}});}
-                       if(resetOptions.audit){["gc-tpa","gc-audit-prog","gc-feuille-tests","gc-audit-actions","gc-audit-checklist","gc-audit-checklist-custom","gc-audit-grille-taches","gc-pca-risques","gc-pca-procedures","gc-pca-tests","gc-coso-scores"].forEach(k=>{try{_lsSet(k,"[]");}catch (_) {}});}
-                       if(resetOptions.logistique){["gc-achats","gc-logmod-stocks","gc-logistique-actifs","gc-inventaires","gc-inventaire-en-cours"].forEach(k=>{try{_lsSet(k,"[]");}catch (_) {}});}
-                       if(resetOptions.comm){["gc-comm-campagnes","gc-comm-contacts","gc-comm-fiches","gc-comm-custom-tpl"].forEach(k=>{try{_lsSet(k,"[]");}catch (_) {}});}
-                       if(resetOptions.sessionLogs){if(setSessionLogs)setSessionLogs([]);}
-                       if(resetOptions.achats){try{_lsSet("gc-achats","[]");dsSave("gc-achats",[]).catch(err=>gcToast.syncError("gc-achats",err));_lsSet("gc-stocks","[]");dsSave("gc-stocks",[]).catch(err=>gcToast.syncError("gc-stocks",err));}catch (_) {}}
-                       if(resetOptions.notifications){try{Object.keys(localStorage).filter(k=>k&&k.includes(":notif:")).forEach(k=>{try{_lsRm(k);}catch(_){}});}catch (_) {}}
-                       if(resetOptions.users&&users&&setUsers){const p=users.map(u=>({id:u.id,name:u.name,role:u.role,level:u.level,process:u.process,processes:u.processes,email:u.email,password:u.password,isAdmin:u.isAdmin,isMG:u.isMG,color:u.color,alias:u.alias}));setUsers(p);}
+                       if(!await gcConfirm(`⚠️ Confirmer la réinitialisation de :\n${selected.map(k=>"• "+(labels[k]||k)).join("\n")}\n\nCette action est IRRÉVERSIBLE et affectera TOUS les postes connectés.`,"Confirmation","🗑️",true))return;
+
+                       // Helper : vide une clé en LS + serveur (propagation cross-machine via broadcast)
+                       const _wipe = (key, val=[]) => {
+                         try { _lsSet(key, JSON.stringify(val)); } catch(_) {}
+                         // Vider aussi les timestamps TS pour forcer re-fetch sur tous les postes
+                         try { localStorage.removeItem('__ts__:' + key); localStorage.removeItem('__svts__:' + key); } catch(_) {}
+                         return dsSave(key, val, null, {forceOverwrite:true}).catch(()=>{});
+                       };
+
+                       const ops = [];
+
+                       if(resetOptions.dossiers){
+                         if(setDossiers)setDossiers([]);
+                         ops.push(_wipe('dossiers'), _wipe('gc-dossiers'), _wipe('gc-pending-delete-approvals'), _wipe('pendingApprovals'));
+                         if(setPendingApprovals)setPendingApprovals([]);
+                       }
+                       if(resetOptions.taches){
+                         if(setTaches)setTaches([]);
+                         ops.push(_wipe('taches'), _wipe('gc-taches'));
+                       }
+                       if(resetOptions.rdvs){
+                         if(setRdvs)setRdvs([]);
+                         ops.push(_wipe('rdvs'), _wipe('gc-rdvs'));
+                       }
+                       if(resetOptions.partners){
+                         if(setPartnersSync)setPartnersSync([]);
+                         ops.push(_wipe('partners'), _wipe('gc-crm-clients'), _wipe('gc-crm-interactions'), _wipe('gc-crm-opps'), _wipe('gc-crm-relances'));
+                       }
+                       if(resetOptions.approvals){
+                         if(setPendingApprovals)setPendingApprovals([]);
+                         ops.push(_wipe('pendingApprovals'), _wipe('gc-pending-approvals'), _wipe('gc-pending-delete-approvals'));
+                       }
+                       if(resetOptions.connections){
+                         ops.push(_wipe('gc-pending-connections'), _wipe('gc-pending-account-actions'));
+                       }
+                       if(resetOptions.sirh){
+                         ["gc-sirh-presences","gc-sirh-leaves","gc-leaves","gc-sirh-recrutements","gc-recrutements","gc-paie-transferts","gc-sirh-evaluations","gc-sirh-fichiers","gc-sirh-reinstatements","gc-sirh-onboarding","gc-paie-taux"].forEach(k=>ops.push(_wipe(k)));
+                       }
+                       if(resetOptions.docs){
+                         ["gc-internal-docs","gc-external-docs","gc-dossier-files","gc-docs-unified","gc-standalone-docs","gc-docs-archives","gc-ohada-docs","gc-docs-templates","standaloneDocuments","gc-writer-docs","gc-writer-pro-v2","gc-tableur-pro","gc-pres-decks-v2","gc-courrier-docs"].forEach(k=>ops.push(_wipe(k)));
+                       }
+                       if(resetOptions.finance){
+                         ["gc-journal","gc-journal-ohada","gc-budget","gc-budget-entries","gc-budget-rapide","gc-factures","gc-devis","gc-ohada-custom","gc-ohada-overrides","gc-piece-series","gc-paie-transferts"].forEach(k=>ops.push(_wipe(k)));
+                       }
+                       if(resetOptions.audit){
+                         ["gc-tpa","gc-audit-prog","gc-feuille-tests","gc-audit-actions","gc-audit-checklist","gc-audit-checklist-custom","gc-audit-grille-taches","gc-pca","gc-pca-risques","gc-pca-procedures","gc-pca-tests","gc-coso-scores","gc-coso-notes","gc-coso-custom-q","gc-risks","gc-nc","gc-obligations","gc-conffull-approvals","gc-conffull-checks","gc-conffull-kpi","gc-conffull-veille","gc-rgpd-traitements","gc-amelio-actions","gc-amelio-kpis","gc-amelio-ncs"].forEach(k=>ops.push(_wipe(k)));
+                       }
+                       if(resetOptions.logistique){
+                         ["gc-achats","gc-stocks","gc-logmod-stocks","gc-logistique-actifs","gc-inventaires","gc-inventaire-en-cours","gc-resources"].forEach(k=>ops.push(_wipe(k)));
+                       }
+                       if(resetOptions.comm){
+                         ["gc-comm-campagnes","gc-comm-contacts","gc-comm-fiches","gc-comm-custom-tpl"].forEach(k=>ops.push(_wipe(k)));
+                       }
+                       if(resetOptions.sessionLogs){
+                         if(setSessionLogs)setSessionLogs([]);
+                         ops.push(_wipe('gc-session-logs'));
+                       }
+                       if(resetOptions.notifications){
+                         try{Object.keys(localStorage).filter(k=>k&&(k.includes(":notif:")||k==="gc-notifications")).forEach(k=>{try{_lsRm(k);}catch(_){}});}catch(_){}
+                         ops.push(_wipe('gc-notifications'));
+                       }
+                       if(resetOptions.users&&users&&setUsers){
+                         const p=users.map(u=>({id:u.id,name:u.name,role:u.role,level:u.level,process:u.process,processes:u.processes,email:u.email,password:u.password,isAdmin:u.isAdmin,isMG:u.isMG,color:u.color,alias:u.alias}));
+                         setUsers(p);
+                         ops.push(_wipe('users', p), _wipe('gc-users', p));
+                       }
+
+                       // Attendre toutes les syncs serveur
+                       await Promise.allSettled(ops);
+
+                       // Vider les tombstones des catégories effacées pour éviter résurrections fantômes
+                       try { _lsSet('gc-tombstones', '[]'); } catch(_) {}
+                       ops.push(_wipe('gc-tombstones'));
+
+                       // Notifier les autres postes via un événement custom (forcer resync)
+                       try { window.dispatchEvent(new CustomEvent('gc-resync-all')); } catch(_) {}
+
                        setShowResetModal(false);setResetConfirmCode("");
-                       gcAlert(`✅ Réinitialisation effectuée — ${selected.length} catégorie(s) effacée(s). Comptes préservés.`);
+                       gcAlert(`✅ Réinitialisation effectuée — ${selected.length} catégorie(s) effacée(s) sur TOUS les postes. Actualisation dans 3s…`);
+                       setTimeout(()=>window.location.reload(), 3000);
                      }} style={{flex:1,background:"#C41E3A",border:"none",color:"#fff",borderRadius:9,padding:"11px 0",cursor:"pointer",fontWeight:800,fontSize:12}}>🗑️ Effacer la sélection</button>
                      <button onClick={()=>{setShowResetModal(false);setResetConfirmCode("");}} style={{background:T.surface2,border:`1px solid ${T.border}`,color:T.textMuted,borderRadius:9,padding:"11px 20px",cursor:"pointer",fontWeight:700,fontSize:12}}>Annuler</button>
                    </div>
