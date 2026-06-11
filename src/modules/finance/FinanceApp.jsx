@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // FinanceApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet, dsWipeKey } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
@@ -2214,43 +2214,17 @@ export default function App() {
     setRdvsState([]); setProdRdvs([]); lsSave("rdvs", []);
     setPendingApprovalsState([]); setProdPending([]); lsSave("pendingApprovals", []);
     setPartnersStateRaw([]); setProdPartners([]); lsSave("partners", []);
-    // -- SIRH --
-    try { _lsSet("gc-sirh-presences","[]"); dsSave("gc-sirh-presences",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-sirh-leaves","[]"); dsSave("gc-sirh-leaves",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-sirh-recrutements","[]"); dsSave("gc-sirh-recrutements",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-sirh-evaluations","[]"); dsSave("gc-sirh-evaluations",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-paie-transferts", "[]"); } catch (_) {}
-    // -- Documents --
-    try { _lsSet("gc-internal-docs","[]"); dsSave("gc-internal-docs",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-external-docs","[]"); dsSave("gc-external-docs",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-dossier-files", "[]"); } catch (_) {}
-    // -- Messagerie --
-    try { _lsSet("gc-messages-global", "[]"); } catch (_) {}
-    try { _lsSet("gc-courrier-docs", "[]"); } catch (_) {}
-    // -- Journaux --
-    try { _lsSet("gc-session-logs","[]"); dsSave("gc-session-logs",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-account-actions","[]"); dsSave("gc-account-actions",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-error-log", "[]"); } catch (_) {}
-    // -- Accès --
-    try { _lsRm("gc-pending-connections"); } catch (_) {}
-    try { _lsRm("gc-app-habilitations"); } catch (_) {}
-    try { _lsRm("gc-app-access-codes"); } catch (_) {}
-    // -- Codification & Archivage --
-    try { _lsSet("gc-codif-registry","[]"); dsSave("gc-codif-registry",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    // -- Productivité --
-    try { _lsRm("gc-kanban-cols-v2"); } catch (_) {}
-    try { _lsRm("gc-kanban-cards-v2"); } catch (_) {}
-    try { _lsRm("gc-notes-rapides"); } catch (_) {}
-    try { _lsRm("gc-notepad-v2"); } catch (_) {}
-    try { _lsRm("gc-memos"); } catch (_) {}
-    try { _lsRm("gc-tableur-pro"); } catch (_) {}
-    try { _lsRm("gc-alarms-v2"); } catch (_) {}
-    try { _lsRm("gc-widget-alarms"); } catch (_) {}
-    try { _lsRm("gc-demandes"); } catch (_) {}
-    try { _lsRm("gc-archives"); } catch (_) {}
-    try { _lsRm("gc-standalone-docs"); } catch (_) {}
-    try { _lsRm("gc-security-alerts"); } catch (_) {}
-    try { _lsRm("gc-system-msgs"); } catch (_) {}    // FIX v72 — Messages système (persistés depuis v72)
+    // -- Wipe serveur + wipe-registry (propagation cross-machine + anti-résurrection) --
+    const sharedKeysToWipe = [
+      "gc-sirh-presences", "gc-sirh-leaves", "gc-sirh-recrutements", "gc-sirh-evaluations",
+      "gc-paie-transferts", "gc-internal-docs", "gc-external-docs", "gc-dossier-files",
+      "gc-messages-global", "gc-courrier-docs", "gc-session-logs", "gc-account-actions",
+      "gc-error-log", "gc-pending-connections", "gc-app-habilitations", "gc-app-access-codes",
+      "gc-codif-registry", "gc-kanban-cols-v2", "gc-kanban-cards-v2", "gc-notes-rapides",
+      "gc-notepad-v2", "gc-memos", "gc-tableur-pro", "gc-alarms-v2", "gc-widget-alarms",
+      "gc-demandes", "gc-archives", "gc-standalone-docs", "gc-security-alerts", "gc-system-msgs",
+    ];
+    await Promise.allSettled(sharedKeysToWipe.map(k => dsWipeKey(k).catch(() => {})));
     // -- Badges "vu" sidebar (tous utilisateurs) --
     // FIX v92 Bug#7 — Snapshot complet des clés AVANT suppression (évite décalage d'index)
     try {

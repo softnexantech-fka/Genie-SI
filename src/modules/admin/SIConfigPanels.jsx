@@ -349,6 +349,7 @@ export function FiscalConfigPanel({ T, currentUser }) {
   const reset = async () => {
     if (!await gcConfirm('Réinitialiser aux taux officiels Gabon 2026 ?')) return;
     _lsRm('gc-fiscal-config');
+    dsSave('gc-fiscal-config', GC_FISCAL_CONFIG_DEFAULT, null, { forceOverwrite: true }).catch(() => {});
     setCfg(GC_FISCAL_CONFIG_DEFAULT);
     setSaved(false);
   };

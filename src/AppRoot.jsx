@@ -776,9 +776,9 @@ export default function App() {
         'gc-security-alerts': 'Alertes sécurité',
       };
       try {
-        if (localUser?.id && moduleAlerts[key] && ['set','item_delete','delete'].includes(event.action) && event.by !== localUser.id) {
-          gcPushNotif(localUser.id, {
-            id: `N${Date.now()}${localUser.id}`,
+        if (currentUser?.id && moduleAlerts[key] && ['set','item_delete','delete'].includes(event.action) && event.by !== currentUser.id) {
+          gcPushNotif(currentUser.id, {
+            id: `N${Date.now()}${currentUser.id}`,
             icon: '🔔',
             message: `${moduleAlerts[key]} mis à jour sur un autre poste`,
             at: new Date().toISOString(),
@@ -956,7 +956,7 @@ export default function App() {
           // Force un rechargement complet sur toutes les machines connectées.
           case 'gc-factory-reset-signal': {
             // Ne pas recharger la machine qui a initié le reset (elle se déconnecte elle-même)
-            if (evtKey === 'gc-factory-reset-signal' && evt?.by !== (currentUser?.id)) {
+            if (key === 'gc-factory-reset-signal' && event?.by !== (currentUser?.id)) {
               try {
                 // Vider tous les caches localStorage gc-* avant rechargement
                 Object.keys(localStorage)
