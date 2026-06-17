@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synchronisation Utilisateurs - SI Genie Consultant</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(135deg, #0A1E4A 0%, #162540 50%, #050D1A 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #E8EDF5;
+      padding: 20px;
+    }
+    .container {
+      background: #0F2847;
+      border: 1px solid #C41E3A44;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 600px;
+      box-shadow: 0 32px 100px rgba(0,0,0,0.5), 0 0 0 1px rgba(196,30,58,0.12);
+    }
+    h1 {
+      color: #C41E3A;
+      margin-bottom: 20px;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status {
+      background: #16293922;
+      border-left: 4px solid #C41E3A;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .status-item:last-child { margin-bottom: 0; }
+    .status-label { color: #A0B0C8; }
+    .status-value { font-weight: 700; color: #22C55E; font-family: monospace; }
+    .users-list {
+      background: #162540;
+      border: 1px solid #3B82F644;
+      border-radius: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+    .user-item {
+      padding: 10px 15px;
+      border-bottom: 1px solid #3B82F622;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .user-item:last-child { border-bottom: none; }
+    .user-id { color: #F59E0B; font-weight: 600; font-family: monospace; }
+    .user-name { color: #A0B0C8; margin-left: 10px; flex: 1; }
+    .user-level { color: #3B82F6; background: #3B82F611; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    button {
+      flex: 1;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.5px;
+    }
+    .btn-primary {
+      background: #C41E3A;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #A01A2E;
+      box-shadow: 0 8px 24px rgba(196,30,58,0.4);
+    }
+    .btn-secondary {
+      background: #3B82F6;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #2563EB;
+    }
+    .info-box {
+      background: #EF444415;
+      border-left: 4px solid #EF4444;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 20px;
+      display: none;
+    }
+    .info-box.show { display: block; }
+    .info-box.success {
+      background: #22C55E15;
+      border-left-color: #22C55E;
+    }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #C41E3A44;
+      border-top-color: #C41E3A;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Synchronisation Utilisateurs</h1>
+    
+    <div class="status">
+      <div class="status-item">
+        <span class="status-label">Comptes en DB:</span>
+        <span class="status-value">14</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Base de donnees:</span>
+        <span class="status-value">si_genie.db</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Etat LocalStorage:</span>
+        <span class="status-value" id="localStorageStatus">Non synchronise</span>
+      </div>
+    </div>
+
+    <h2 style="font-size: 16px; margin-bottom: 10px; color: #A0B0C8;">Comptes a synchroniser:</h2>
+    <div class="users-list">
+        <div class="user-item">
+          <span class="user-id">USR-ADM-000</span>
+          <span class="user-name">Superviseur SI</span>
+          <span class="user-level">L6</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-DG-001</span>
+          <span class="user-name">GILLES LEPEBE</span>
+          <span class="user-level">L5</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-S01-5763</span>
+          <span class="user-name">BELOMBO PAOLA BERLINE</span>
+          <span class="user-level">L4</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-S02-0571</span>
+          <span class="user-name">KASTANH PEMAGNY FEDRICH LORPHANE</span>
+          <span class="user-level">L4</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-O02-8587</span>
+          <span class="user-name">NZE NGUEMA JEREMY</span>
+          <span class="user-level">L4</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-S03-3840</span>
+          <span class="user-name">NSEGHE ELEMVA ADELIA DAN FARNELLE</span>
+          <span class="user-level">L4</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-P02-2567</span>
+          <span class="user-name">OBIANG MODOSS LOUIS PAUL EVARISTE</span>
+          <span class="user-level">L4</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-O02-4973</span>
+          <span class="user-name">ITONDJA HANGOUE4 BRIDON Jr</span>
+          <span class="user-level">L3</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-O01-7458</span>
+          <span class="user-name">MOULOUNGUI MARTINA</span>
+          <span class="user-level">L3</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-O02-6873</span>
+          <span class="user-name">MAYOMBO MATOUMBA MICHELLE SANDY</span>
+          <span class="user-level">L4</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-O02-5833</span>
+          <span class="user-name">BABAZE AKOUBINA CHAPUIE CYBELLE</span>
+          <span class="user-level">L2</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-O02-8631</span>
+          <span class="user-name">SAHOU-MANGUI MURIELLE</span>
+          <span class="user-level">L2</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-S05-6391</span>
+          <span class="user-name">KALOGA MADI</span>
+          <span class="user-level">L3</span>
+        </div>
+        <div class="user-item">
+          <span class="user-id">USR-S01-2483</span>
+          <span class="user-name">ANGUILET DAOUDA RISSI WILLIAME MYRIAME LOUISE GABRIELLE</span>
+          <span class="user-level">L3</span>
+        </div>
+    </div>
+
+    <div class="button-group">
+      <button class="btn-primary" onclick="syncNow()">
+        <span id="btnText">SYNCHRONISER MAINTENANT</span>
+      </button>
+      <button class="btn-secondary" onclick="checkStatus()">
+        VERIFIER STATUS
+      </button>
+    </div>
+
+    <div id="infoBox" class="info-box">
+      <p id="infoText"></p>
+    </div>
+  </div>
+
+  <script>
+    const DATA = [{"id":"USR-ADM-000","name":"Superviseur SI","alias":"admin.si","role":"Direction SI","dept":"Système d'Information","process":"ALL","level":6,"avatar":"AD","color":"#C41E3A","isAdmin":true,"sexe":"N/A","nationalite":"N/A","situationMatrimoniale":"N/A","telephone":"+241 000 000 000","email":"admin@genie-consultant.com","adresse":"Siège Social","bio":"Compte d'administration système du SI Génie Consultant. Configurez les comptes utilisateurs depuis les Paramètres Admin.","photoUrl":null,"lastLogin":"2026-06-05T11:34:05.324Z","accessCode":null,"processes":["ALL"],"passwordHash":"947adf4731ce63781262f5eaa4bcf7b304bfa2b4b899db3275b81f6de74eff89"},{"id":"USR-DG-001","name":"GILLES LEPEBE","alias":"dg.genie","role":"Directeur Général","dept":"Direction Générale","process":"P01","level":5,"avatar":"DG","color":"#C9A84C","isMG":true,"sexe":"M","nationalite":"Gabonaise","situationMatrimoniale":"Célibataire","telephone":"+241 07138659","email":"dg@genie-consultant.com","adresse":"Direction Générale","bio":"Compte Directeur Général par défaut. Veuillez configurer votre profil à la première connexion.","photoUrl":null,"isActive":true,"accountStatus":"ACTIF","isFirstLogin":false,"lastLogin":"2026-06-11T21:19:50.103Z","accessCode":null,"processes":["P01","P02","P03","P04"],"needsSirhOnboarding":false,"sirhIntegratedAt":"2026-04-27T15:42:41.598Z","sirhIntegratedBy":"SYSTEME","isAdmin":false,"startDate":"","location":"Siège","typeContrat":"CDI","matricule":"00","phone":"+241 07138659","updatedAt":"2026-06-05T12:10:38.870Z","updatedBy":"USR-S03-3840","passwordHash":"ec84d9e28100bcc651a40ec79c48c57eb35d94c57c5111bf0b66be396d718531"},{"id":"USR-S01-5763","name":"BELOMBO PAOLA BERLINE","alias":"belombo","role":"Responsable Finance & Comptabilité","dept":"Finance & Comptabilité","process":"S01","level":4,"avatar":"BP","color":"#06B6D4","isAdmin":false,"sexe":"F","nationalite":"Gabonaise","situationMatrimoniale":"Célibataire","telephone":"+241 04258474","email":"berline-fin@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable Finance & Comptabilité au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:06:45.763Z","needsSirhOnboarding":false,"processes":["S01","P03","S05"],"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:10.868Z","sirhIntegratedBy":"Superviseur SI","lastLogin":"2026-05-04T13:45:45.712Z","accessCode":null,"startDate":"05/01/2026","location":"Centre ville","salaireBase":200000,"typeContrat":"CDD","matricule":"01","phone":"+241 04258474","updatedAt":"2026-06-05T12:11:57.967Z","updatedBy":"USR-S03-3840","passwordHash":"5dd57c92bd25860ea767e3cf919aeace4cfec18037ae5ce33ebbcbbb594eb17e"},{"id":"USR-S02-0571","name":"KASTANH PEMAGNY FEDRICH LORPHANE","alias":"fkastanh","role":"Responsable Audit & Contrôle - Conformité","dept":"Audit & Contrôle","process":"S02","level":4,"avatar":"KP","color":"#F59E0B","isAdmin":false,"sexe":"M","nationalite":"Gabonaise","situationMatrimoniale":"Célibataire","telephone":"+241 074029299","email":"fkastanh-rac@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable Audit & Contrôle - Conformité au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:08:00.571Z","needsSirhOnboarding":false,"processes":["S02","P02","O03"],"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","lastLogin":"2026-06-08T09:33:14.946Z","accessCode":null,"isFirstLogin":false,"sirhIntegratedAt":"2026-04-27T16:09:13.597Z","sirhIntegratedBy":"Superviseur SI","startDate":"","location":"Siège","typeContrat":"Stage","phone":"+241 074029299","updatedAt":"2026-06-05T12:19:01.507Z","updatedBy":"USR-S03-3840","passwordHash":"4080c9403bd7810523e6792bbe8c29683e58e1e85a4873d1d01386896ac55a04"},{"id":"USR-O02-8587","name":"NZE NGUEMA JEREMY","alias":"nze","role":"Responsable des Relations Publiques","dept":"Département Juridique","process":"P04","level":4,"avatar":"NN","color":"#06B6D4","isAdmin":false,"sexe":"M","nationalite":"Gabonaise","situationMatrimoniale":"Célibataire","telephone":"+241 ","email":"jeremy-jur@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable Juridique au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:09:48.587Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","processes":["P04","O02","S05"],"sirhIntegratedAt":"2026-04-27T16:09:17.275Z","sirhIntegratedBy":"Superviseur SI","startDate":"05/01/2026","location":"Centre ville","salaireBase":150000,"typeContrat":"CDD","matricule":"03","phone":"+241 ","updatedAt":"2026-06-05T12:15:50.599Z","updatedBy":"USR-S03-3840","passwordHash":"f428357e60d1e22d2929594c9df504d85bd891d926c07f52c84593a4967454ad"},{"id":"USR-S03-3840","name":"NSEGHE ELEMVA ADELIA DAN FARNELLE","alias":"nseghe","role":"Responsable Ressources Humaines","dept":"Ressources Humaines","process":"S03","level":4,"avatar":"NE","color":"#06B6D4","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 04462960","email":"dan-rh@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable Ressources Humaines au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:11:13.841Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:20.069Z","sirhIntegratedBy":"Superviseur SI","startDate":"05/001/2026","location":"Siège","typeContrat":"Stage","phone":"+241 04462960","updatedAt":"2026-06-05T12:16:24.830Z","updatedBy":"USR-S03-3840","processes":["S03"],"salaireBase":80000,"lastLogin":"2026-06-09T12:22:29.505Z","accessCode":null,"passwordHash":"78b0c4e9e13fde649c04da9be72a639b38f36ab31593d96ce07ee7fc09b07ba5"},{"id":"USR-P02-2567","name":"OBIANG MODOSS LOUIS PAUL EVARISTE","alias":"obiang","role":"Responsable Conformité - Veille Commerciale","dept":"Non défini","process":"P02","level":4,"avatar":"OM","color":"#3B82F6","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 000 000 000","email":"modoss-conf@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable Conformité - Veille Commerciale au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:14:32.567Z","needsSirhOnboarding":false,"processes":["P02","P04","S04"],"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:22.932Z","sirhIntegratedBy":"Superviseur SI","passwordHash":"073823e5dc2e8e77b75696c0fcfc0592b734980d03235512ba19fb7701bbf7b3"},{"id":"USR-O02-4973","name":"ITONDJA HANGOUE4 BRIDON Jr","alias":"itondja","role":"Juriste & Assistant Resp Rel avec l'Ext","dept":"Département Juridique","process":"O02","level":3,"avatar":"IH","color":"#3B82F6","isAdmin":false,"sexe":"M","nationalite":"Gabonaise","situationMatrimoniale":"Célibataire","telephone":"+241 000 000 000","email":"bridon-jur@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Assistant Responsable Juridique au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:16:04.973Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","processes":["O02"],"sirhIntegratedAt":"2026-04-27T16:09:25.803Z","sirhIntegratedBy":"Superviseur SI","lastLogin":"2026-06-11T10:27:19.030Z","accessCode":null,"startDate":"05/05/2026","location":"Siège","typeContrat":"Stage","phone":"+241 000 000 000","updatedAt":"2026-06-05T12:20:26.835Z","updatedBy":"USR-S03-3840","passwordHash":"b8328ab2316b7daa088e43de4088a50f9cfc5d54f0cfe1eab7b974be192d625f"},{"id":"USR-O01-7458","name":"MOULOUNGUI MARTINA","alias":"mouloungui","role":"Responsable Administrative & Assistante DG","dept":"Finance & Comptabilité","process":"O01","level":3,"avatar":"MM","color":"#0EA5E9","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 000 000 000","email":"gabrielle-fin@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable Administrative & Assistante DG au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:20:07.458Z","needsSirhOnboarding":false,"processes":["O01","S03"],"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:31.212Z","sirhIntegratedBy":"Superviseur SI","lastLogin":"2026-06-11T15:14:40.570Z","accessCode":null,"username":"mouloungui","isMG":false,"isFirstLogin":false,"passwordHash":"3363a9894b3933325e0b70881af0f1131cf0ad8a29af5d1d0c2954efc5178a3e"},{"id":"USR-O02-6873","name":"MAYOMBO MATOUMBA MICHELLE SANDY","alias":"mayombo","role":"Responsable Juridique","dept":"Département Juridique","process":"O02","level":4,"avatar":"MM","color":"#EC4899","isAdmin":false,"sexe":"F","nationalite":"Gabonaise","situationMatrimoniale":"Célibataire","telephone":"+241 000 000 000","email":"michelle-jur@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Responsable du service Juridique au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:21:36.873Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","processes":["O02"],"sirhIntegratedAt":"2026-04-27T16:09:33.771Z","sirhIntegratedBy":"Superviseur SI","startDate":"05/01/2026","location":"Siège","phone":"+241 000 000 000","updatedAt":"2026-06-05T12:22:07.468Z","updatedBy":"USR-S03-3840","lastLogin":"2026-06-09T12:24:14.974Z","accessCode":null,"salaireBase":150000,"typeContrat":"CDD","matricule":"05","passwordHash":"bf307a3593026bdf386cddc0731fe58504fc4a9b6d7790d46f5c80a47ae0e3a1"},{"id":"USR-O02-5833","name":"BABAZE AKOUBINA CHAPUIE CYBELLE","alias":"babaze","role":"Juriste","dept":"Département Juridique","process":"O02","level":2,"avatar":"BA","color":"#EC4899","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 04405533","email":"cybelle-jur@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Juriste au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:23:15.833Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:36.835Z","sirhIntegratedBy":"Superviseur SI","processes":["O02"],"startDate":"05/01/2026","location":"Siège","salaireBase":150000,"typeContrat":"CDD","matricule":"04","phone":"+241 04405533","updatedAt":"2026-06-05T12:23:38.450Z","updatedBy":"USR-S03-3840","passwordHash":"85e0c97424789c444e5820f10f9525db47320ed8241dcc498a76273eb6a1ec8d"},{"id":"USR-O02-8631","name":"SAHOU-MANGUI MURIELLE","alias":"sahou-mangui","role":"Juriste","dept":"Département Juridique","process":"O02","level":2,"avatar":"SM","color":"#F59E0B","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 06476716","email":"murielle-jur@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Juriste au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:24:08.632Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:39.564Z","sirhIntegratedBy":"Superviseur SI","lastLogin":"2026-06-05T11:28:10.405Z","accessCode":null,"processes":["O02"],"startDate":"05/01/2026","location":"Siège","salaireBase":150000,"typeContrat":"CDD","matricule":"06","phone":"+241 06476716","updatedAt":"2026-06-05T12:25:20.961Z","updatedBy":"USR-S03-3840","passwordHash":"ac779006aacf6d71028b4373be8c2b4b1b8a22438838971070066419e73d015c"},{"id":"USR-S05-6391","name":"KALOGA MADI","alias":"kaloga","role":"Chargé de Logistique & Rel avec Extérieur","dept":"Relations Ext. & Logistique","process":"S05","level":3,"avatar":"KM","color":"#22C55E","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 000 000 000","email":"madi-log@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Chargé de Logistique & Rel avec Extérieur au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-04-16T09:26:46.391Z","needsSirhOnboarding":false,"createdByDG":true,"createdByDGId":"USR-DG-001","createdByDGName":"GILLES LEPEBE","sirhIntegratedAt":"2026-04-27T16:09:48.419Z","sirhIntegratedBy":"Superviseur SI","processes":["S05"],"passwordHash":"7fe7124077233ef706413136eac2f467ac977cf8a1bef0273ceb2e49305962bd"},{"id":"USR-S01-2483","name":"ANGUILET DAOUDA RISSI WILLIAME MYRIAME LOUISE GABRIELLE","alias":"anguilet","role":"Assistante Administrative & Comptable","dept":"Finance & Comptabilité","process":"S01","level":3,"avatar":"AD","color":"#22C55E","isAdmin":false,"sexe":"N/A","nationalite":"Gabonaise","situationMatrimoniale":"N/A","telephone":"+241 000 000 000","email":"gabi-fin@genie-consultant.com","adresse":"Libreville, Gabon","bio":"Assistante Administrative & Comptable au cabinet Génie Consultant.","photoUrl":null,"accountStatus":"ACTIF","createdAt":"2026-05-05T10:56:02.483Z","needsSirhOnboarding":true,"createdByAdmin":true,"createdByAdminId":"USR-ADM-000","lastLogin":"2026-06-11T14:37:04.111Z","accessCode":null,"processes":["S01"],"passwordHash":"33462aa0feb6fbc7d8e13898be249152b0a6b79f9e6facbb8cdbfd1cebd27ce0"}];
+
+    function showInfo(msg, isSuccess = false) {
+      const box = document.getElementById('infoBox');
+      const text = document.getElementById('infoText');
+      text.textContent = msg;
+      box.classList.toggle('success', isSuccess);
+      box.classList.add('show');
+    }
+
+    function checkStatus() {
+      try {
+        const stored = localStorage.getItem('GC_SI_v12:users') || localStorage.getItem('users');
+        if (!stored) {
+          showInfo('Aucune donnee utilisateur dans localStorage');
+          return;
+        }
+        const parsed = JSON.parse(stored);
+        const count = Array.isArray(parsed) ? parsed.length : 0;
+        showInfo('localStorage contient ' + count + ' comptes', true);
+      } catch (e) {
+        showInfo('Erreur lecture localStorage: ' + e.message);
+      }
+    }
+
+    async function syncNow() {
+      const btn = document.querySelector('.btn-primary');
+      const btnText = document.getElementById('btnText');
+      const original = btnText.textContent;
+      
+      try {
+        btn.disabled = true;
+        btnText.textContent = 'Synchronisation...';
+
+        localStorage.setItem('GC_SI_v12:users', JSON.stringify(DATA));
+        localStorage.setItem('users', JSON.stringify(DATA));
+        
+        console.log('Donnees ecrites dans localStorage');
+        console.log('GC_SI_v12:users: ' + DATA.length + ' comptes');
+        console.log('users: ' + DATA.length + ' comptes');
+
+        showInfo(DATA.length + ' comptes synchronises dans localStorage !\n\nRechargez la page ou fermez/rouvrez le navigateur pour appliquer.', true);
+        
+        setTimeout(() => {
+          btnText.textContent = original;
+          btn.disabled = false;
+        }, 2000);
+
+      } catch (e) {
+        showInfo('Erreur synchronisation: ' + e.message);
+        btnText.textContent = original;
+        btn.disabled = false;
+      }
+    }
+
+    setTimeout(() => {
+      try {
+        const stored = localStorage.getItem('GC_SI_v12:users') || localStorage.getItem('users');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          document.getElementById('localStorageStatus').textContent = (Array.isArray(parsed) ? parsed.length : 0) + ' comptes synchronises';
+        }
+      } catch (_) {}
+    }, 100);
+  </script>
+</body>
+</html>
