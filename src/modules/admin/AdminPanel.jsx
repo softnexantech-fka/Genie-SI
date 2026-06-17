@@ -1250,12 +1250,13 @@ Seules les informations d'identité (nom, téléphone, bio...) peuvent être enr
                          ops.push(_wipe('users', p), _wipe('gc-users', p));
                        }
 
-                       // Attendre toutes les syncs serveur
-                       await Promise.allSettled(ops);
+                       // FIX BUG#3 — vider les tombstones AVANT await pour être inclus dans le même batch
+                       // gc-tombstones doit être un objet {} et non un tableau []
+                       try { _lsSet('gc-tombstones', '{}'); } catch(_) {}
+                       ops.push(_wipe('gc-tombstones', {}));
 
-                       // Vider les tombstones des catégories effacées pour éviter résurrections fantômes
-                       try { _lsSet('gc-tombstones', '[]'); } catch(_) {}
-                       ops.push(_wipe('gc-tombstones'));
+                       // Attendre toutes les syncs serveur (incluant le wipe tombstones)
+                       await Promise.allSettled(ops);
 
                        // Notifier les autres postes via un événement custom (forcer resync)
                        try { window.dispatchEvent(new CustomEvent('gc-resync-all')); } catch(_) {}

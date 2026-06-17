@@ -96,10 +96,14 @@ export function useSyncedState(key, fallback = null) {
   }, [key]); // key est la seule dépendance stable voulue — fallback intentionnellement omis
 
   const setSyncedData = useCallback((value) => {
-    const resolved = typeof value === 'function' ? value(data) : value;
-    setData(resolved);
-    dsSave(key, resolved);
-  }, [data, key]);
+    // FIX BUG#7 — utiliser l'updater fonctionnel de setData pour éviter la closure stale.
+    // Sans ça, deux appels rapides utilisaient le même `data` capturé, le second écrasait le premier.
+    setData(prev => {
+      const resolved = typeof value === 'function' ? value(prev) : value;
+      dsSave(key, resolved);
+      return resolved;
+    });
+  }, [key]);
 
   const deleteItem = useCallback(async (itemId) => {
     if (!itemId) return;
@@ -110,10 +114,12 @@ export function useSyncedState(key, fallback = null) {
   }, [data, key]);
 
   const setSyncedDataForce = useCallback((value) => {
-    const resolved = typeof value === 'function' ? value(data) : value;
-    setData(resolved);
-    dsSave(key, resolved, null, { forceOverwrite: true });
-  }, [data, key]);
+    setData(prev => {
+      const resolved = typeof value === 'function' ? value(prev) : value;
+      dsSave(key, resolved, null, { forceOverwrite: true });
+      return resolved;
+    });
+  }, [key]);
 
   return [data, setSyncedData, deleteItem, setSyncedDataForce];
 }

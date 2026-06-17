@@ -231,6 +231,8 @@ export const SHARED_KEYS = new Set([
   'gc-si-source',           // source SI configurée
   'gc-ai-delays',           // délais IA configurés
   'gc-anti-redondance-v1',  // anti-redondance données
+  // FIX BUG#5 — gc-wipe-registry doit être dans SHARED_KEYS pour être persisté via dsSave/dsWipeKey
+  'gc-wipe-registry',       // registre des wipes cross-machine (anti-résurrection)
 ]);
 
 function isSharedKey(key) {

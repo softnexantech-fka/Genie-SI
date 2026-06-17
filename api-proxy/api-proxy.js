@@ -1809,6 +1809,23 @@ app.get('/api/data/stats', rateLimiter(30), authenticateToken, async (req, res) 
   res.json(_cachedStats);
 });
 
+// FIX BUG#1 — GET /api/users/list : endpoint public (sans JWT) pour AppRoot.
+// Retourne la liste des comptes sans les champs sensibles (passwordHash, passwordHistory).
+// Utilisé au démarrage pour peupler l'écran de connexion sur les postes frais.
+app.get('/api/users/list', rateLimiter(30), authenticateTokenOptional, async (req, res) => {
+  try {
+    let users = dbReady ? await dbGet('users') : (jsonLoad()['users'] ?? []);
+    if (!Array.isArray(users)) users = [];
+    const safe = users.map(u => {
+      const { passwordHash, passwordHistory, password, ...rest } = u || {};
+      return rest;
+    });
+    res.json({ ok: true, users: safe });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // [FIX v153-E] GET /api/data : authentification obligatoire — endpoint de dump complet
 // (150+ clés dont gc-users, gc-audit-checklist, gc-jur-kyc, gc-cabinet-info...)
 // Accessible uniquement par les admins niveau 4+ pour diagnostic/export
@@ -1819,7 +1836,10 @@ app.get('/api/data', rateLimiter(10), authenticateToken, async (req, res) => {
 });
 
 const CRITICAL_EMPTY_ARRAY_KEYS = new Set([
-  'gc-users','users','gc-dossiers','dossiers','gc-taches','taches','gc-rdvs','rdvs','gc-partners','partners'
+  'gc-users','users','gc-dossiers','dossiers','gc-taches','taches','gc-rdvs','rdvs','gc-partners','partners',
+  // FIX BUG#9 — Données financières sensibles : accès GUEST interdit même en lecture
+  'gc-journal','gc-budget','gc-factures','gc-devis','gc-paie-transferts','gc-paie-taux',
+  'gc-sirh-evaluations','gc-sirh-presences','gc-risks','gc-audit-checklist',
 ]);
 
 // FIX BUG-B18 — Clés de configuration globale qui ne doivent être modifiables
@@ -2015,7 +2035,10 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
           : finalValue.length < existing.length * 0.7
       );
       if (shouldMerge) {
-        const incomingIds = new Set(sanitized.map(item => item?.id).filter(Boolean));
+        // FIX BUG#6 — utiliser finalValue (post-anti-résurrection) et non sanitized
+        // pour calculer les IDs entrants, sinon des items filtrés comptent comme "présents"
+        // et des items serveur qui devaient être préservés sont supprimés à tort.
+        const incomingIds = new Set(finalValue.map(item => item?.id).filter(Boolean));
         let tombstonedIds = new Set();
         try {
           const tombstones = await dbGet('gc-tombstones');
@@ -2213,8 +2236,9 @@ app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, re
   } else { const d = jsonLoad(); delete d[key]; jsonSave(d); }
   const senderSocketId = req.headers['x-socket-id'] || null;
   broadcast('data_changed', { key, action: 'delete', by: userId, ts: Date.now() }, senderSocketId);
-  // FIX BUG#5 — Broadcast immédiat du wipe (pas juste via heartbeat 30s)
-  _wipeRegistry[key] = Date.now();
+  // FIX BUG#4 — Utiliser recordWipe() pour persister le wipe en DB (pas juste en mémoire)
+  // Sans ça, après redémarrage serveur le wipe est perdu et les clients offline peuvent ressusciter
+  await recordWipe(key);
   broadcastWipeRegistryUpdate(key);
   res.json({ ok: true, key, deleted: true });
 });
