@@ -943,7 +943,6 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
   useRemoteSync({
     'gc-pdca': setPdca, 'gc-mckinsey': setMckinsey, 'gc-mc7s': setMc7s, 'gc-5m': setFiveM,
     'gc-5s': setFiveS,
-    // Normalisation défensive : fusionner avec les valeurs par défaut pour éviter les champs manquants
     'gc-pca': (v) => setPca(v && typeof v === 'object' && !Array.isArray(v) ? {...PCA_DEFAULTS, ...v} : PCA_DEFAULTS),
     'gc-bcg': setBcgItems, 'gc-10m': setTenM, 'gc-resources': setResources, 'gc-porter': setPorter,
     'gc-qqoqcp': (v) => setQqoqcp(v && typeof v === 'object' && !Array.isArray(v) ? {...QQOQCP_DEFAULTS, ...v} : QQOQCP_DEFAULTS),

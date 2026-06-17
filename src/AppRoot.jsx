@@ -9,7 +9,7 @@ import {
   _gcProxyFetch,
   _gcEncrypt, _lsGetSecure, _lsSetSecure,
   _migrateDGAccount, _checkSchemaVersion, _migrateLS, SIErrorBoundary,
-  gcMigrateFilesFromLS, gcSyncFilesToServer, gcFileStats, dsInitSync, dsStartSync, dsOnSync, dsSave, dsLoad, dsGet, dsClearTombstones,
+  gcMigrateFilesFromLS, gcSyncFilesToServer, gcFileStats, dsInitSync, dsStartSync, dsOnSync, dsSave, dsLoad, dsGet, dsDeleteItemFromArray, dsClearTombstones, dsWipeKey, SHARED_KEYS,
   // FIX vSERVER-TIME — synchronisation heure serveur
   syncServerTime,
   // FIX v127 — fonctions IP centralisées
@@ -201,11 +201,45 @@ export default function App() {
   }, []); // FIX v135 — fin useCallback
   const [isDemoMode, setIsDemoMode] = useState(false);
 
-  // FIX v136 — RACE CONDITION : sur un poste frais, localStorage contient INITIAL_USERS.
-  // La page de login s'affichait AVANT que dsInitSync() ait fini de récupérer les vrais
-  // comptes depuis le serveur → seuls les 2 comptes par défaut étaient visibles.
-  // Solution : bloquer l'affichage du formulaire jusqu'à la fin de l'hydratation (timeout 3s).
+  // FIX v137 — CRITICAL: Load users from API immediately at startup
+  // Before rendering LoginPage, fetch the list from /api/users/list (public endpoint)
+  // This ensures NEW devices/browsers see all accounts even without localStorage cache
   const [hydrating, setHydrating] = useState(true);
+  const [usersFromAPI, setUsersFromAPI] = useState(null);
+  
+  // Start API fetch immediately BEFORE any setState initializers
+  useEffect(() => {
+    const fetchUsersFromAPI = async () => {
+      try {
+        const response = await fetch('/api/users/list', { 
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.ok && Array.isArray(data.users) && data.users.length > 0) {
+            setUsersFromAPI(data.users);
+            // Also save to localStorage for offline support
+            try { _lsSet('users', JSON.stringify(data.users)); } catch (_) {}
+            console.log(`[AppRoot] Loaded ${data.users.length} users from /api/users/list`);
+            return; // Success, exit
+          }
+        }
+      } catch (err) {
+        console.warn('[AppRoot] Failed to fetch /api/users/list:', err.message);
+      }
+      // On timeout or error, try to use cached data after 2s
+      setTimeout(() => {
+        const cached = lsLoad('users', INITIAL_USERS);
+        if (!usersFromAPI && cached.length > 0) {
+          console.log('[AppRoot] Using cached users');
+          setUsersFromAPI(cached);
+        }
+      }, 2000);
+    };
+    
+    fetchUsersFromAPI();
+  }, []);
 
   const [prodUsers, setProdUsers] = useState(() => lsLoad("users", INITIAL_USERS));
   const [prodDossiers, setProdDossiers] = useState(() => lsLoad("dossiers", INITIAL_DOSSIERS));
@@ -214,11 +248,28 @@ export default function App() {
   const [prodPending, setProdPending] = useState(() => lsLoad("pendingApprovals", INITIAL_PENDING));
   const [_prodPartners, setProdPartners] = useState(() => lsLoad("partners", INITIAL_PARTNERS));
 
+  // Once API fetch completes, update the users state
+  useEffect(() => {
+    if (usersFromAPI && usersFromAPI.length > 0) {
+      console.log('[AppRoot] Applying API users to state');
+      setProdUsers(usersFromAPI);
+    }
+  }, [usersFromAPI]);
+
   const [users, setUsersState] = useState(() => lsLoad("users", INITIAL_USERS));
   const [dossiers, setDossiersState] = useState(() => lsLoad("dossiers", INITIAL_DOSSIERS));
   const [taches, setTachesState] = useState(() => lsLoad("taches", INITIAL_TACHES));
   const [rdvs, setRdvsState] = useState(() => lsLoad("rdvs", INITIAL_RDVS));
   const [pendingApprovals, setPendingApprovalsState] = useState(() => lsLoad("pendingApprovals", INITIAL_PENDING));
+  
+  // Once API users are loaded, update the main state too
+  useEffect(() => {
+    if (usersFromAPI && usersFromAPI.length > 0) {
+      console.log('[AppRoot] Updating users state with API data');
+      setUsersState(usersFromAPI);
+    }
+  }, [usersFromAPI]);
+
   const [requireConnApproval, setRequireConnApprovalState] = useState(() => {
     try { return JSON.parse(_lsGet("gc-require-conn-approval") || "false"); } catch (_) { return false; }
   });
@@ -776,9 +827,9 @@ export default function App() {
         'gc-security-alerts': 'Alertes sécurité',
       };
       try {
-        if (localUser?.id && moduleAlerts[key] && ['set','item_delete','delete'].includes(event.action) && event.by !== localUser.id) {
-          gcPushNotif(localUser.id, {
-            id: `N${Date.now()}${localUser.id}`,
+        if (currentUser?.id && moduleAlerts[key] && ['set','item_delete','delete'].includes(event.action) && event.by !== currentUser.id) {
+          gcPushNotif(currentUser.id, {
+            id: `N${Date.now()}${currentUser.id}`,
             icon: '🔔',
             message: `${moduleAlerts[key]} mis à jour sur un autre poste`,
             at: new Date().toISOString(),
@@ -933,12 +984,51 @@ export default function App() {
             }, []);
             break;
           }
+          // FIX v156 — Clés Finance / Audit / Logistique : écriture LS + CustomEvent
+          // BureauOffice n'a pas de state React dans AppRoot, on passe par LS + event custom.
+          case 'gc-journal': case 'gc-budget': case 'gc-factures': case 'gc-stocks':
+          case 'gc-risks': case 'gc-audit-checklist': case 'gc-audit-prog': case 'gc-tpa':
+          case 'gc-achats': case 'gc-logmod-stocks': case 'gc-inventaires': {
+            refreshServerValue(stateKey, (val) => {
+              try { _lsSet(stateKey, JSON.stringify(val)); } catch (_) {}
+              window.dispatchEvent(new CustomEvent('gc:data-sync', { detail: { key: stateKey, value: val } }));
+            }, []);
+            break;
+          }
           // FIX v129 — Actions comptes (suspensions, réactivations, créations par DG/Admin)
           case 'gc-account-actions': {
             refreshServerValue('gc-account-actions', (val) => {
               setPendingAccountActions(val);
               try { _lsSet('gc-account-actions', JSON.stringify(val)); } catch (_) {}
             }, []);
+            break;
+          }
+          // FIX v156 — Signal de réinitialisation totale émis par DG/Admin.
+          // Force un rechargement complet sur toutes les machines connectées.
+          case 'gc-factory-reset-signal': {
+            // Ne pas recharger la machine qui a initié le reset (elle se déconnecte elle-même)
+            if (key === 'gc-factory-reset-signal' && event?.by !== (currentUser?.id)) {
+              try {
+                // Vider tous les caches localStorage gc-* avant rechargement
+                Object.keys(localStorage)
+                  .filter(k => k.startsWith('gc-') || k.startsWith('GC_SI'))
+                  .forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+              } catch (_) {}
+              window.location.reload();
+            }
+            break;
+          }
+          // FIX v156 — Tombstones cross-machine : quand gc-tombstones est mis à jour
+          // (suppression depuis une autre machine), forcer le re-fetch des clés concernées
+          case 'gc-tombstones': {
+            import('./core/datastore.js').then(({ dsGet }) => {
+              dsGet('gc-tombstones', {}).then(tbs => {
+                if (tbs && typeof tbs === 'object') {
+                  try { _lsSet('gc-tombstones', JSON.stringify(tbs)); } catch (_) {}
+                  window.dispatchEvent(new CustomEvent('gc:tombstones-updated', { detail: tbs }));
+                }
+              }).catch(() => {});
+            }).catch(() => {});
             break;
           }
           default: break;
@@ -1564,22 +1654,59 @@ export default function App() {
   };
 
   const handleFactoryReset = async () => {
-    const confirmed = await gcConfirm("⚠️ RÉINITIALISATION TOTALE DU SI\n\nCela effacera L'INTÉGRALITÉ des données :\n• Tous les utilisateurs (y compris les données par défaut)\n• Tous les dossiers, documents, tâches, RDV\n• Tous les partenaires, recrutements, présences, congés\n• Toutes les codifications, journaux, configurations\n\nSeul le compte Compte superviseur sera conservé.\n\nCETTE ACTION EST IRRÉVERSIBLE.\n\nConfirmez-vous ?");
+    const confirmed = await gcConfirm("⚠️ RÉINITIALISATION TOTALE DU SI\n\nCela effacera L'INTÉGRALITÉ des données applicatives :\n• Tous les dossiers, documents, tâches, RDV\n• Tous les partenaires, recrutements, présences, congés\n• Toutes les codifications, journaux, configurations\n\nLes données de compte utilisateur stockées dans les clés \"users\" et \"gc-users\" seront conservées.\n\nCETTE ACTION EST IRRÉVERSIBLE.\n\nConfirmez-vous ?");
     if (!confirmed) return;
     const code = await gcPrompt("Saisir le code de confirmation : RESET-GC-SI");
     if ((code||"").trim() !== "RESET-GC-SI") { gcAlert("❌ Code incorrect. Réinitialisation annulée."); return; }
     // FIX v92 Bug#7d — Object.keys() snapshot complet, évite décalage d'index pendant suppression
-    const keysToDelete = Object.keys(localStorage).filter(
-      k => k && (k.startsWith("GC_SI") || k.startsWith("gc-") || k.startsWith("gc_"))
-    );
+    const keysToDelete = Object.keys(localStorage).filter((k) => {
+      if (!k) return false;
+      if (k === "users" || k === "gc-users") return false;
+      if (k.endsWith(":users") || k.endsWith(":gc-users")) return false;
+      return k.startsWith("GC_SI") || k.startsWith("gc-") || k.startsWith("gc_");
+    });
     keysToDelete.forEach(k => { try { _lsRm(k); } catch (_) {} });
-    const adminOnly = [{ ...INITIAL_USERS[0] }]; // uniquement USR-ADM-000
-    setUsersState(adminOnly); setProdUsers(adminOnly); dsSave("users", adminOnly);
-    setDossiersState([]); setProdDossiers([]); dsSave("dossiers", []);
-    setTachesState([]); setProdTaches([]); dsSave("taches", []);
-    setRdvsState([]); setProdRdvs([]); dsSave("rdvs", []);
-    setPendingApprovalsState([]); setProdPending([]); dsSave("pendingApprovals", []);
-    setPartnersStateRaw([]); setProdPartners([]); dsSave("partners", []);
+    // FIX BUG#15 — Mark all items as deleted BEFORE sending empty state
+    // Without tombstones, offline clients can resurrect deleted items on reconnect
+    const dossiersCurrentState = _lsGet('dossiers') ? JSON.parse(_lsGet('dossiers')) : [];
+    const tachesCurrentState = _lsGet('taches') ? JSON.parse(_lsGet('taches')) : [];
+    const rdvsCurrentState = _lsGet('rdvs') ? JSON.parse(_lsGet('rdvs')) : [];
+    const pendingCurrentState = _lsGet('pendingApprovals') ? JSON.parse(_lsGet('pendingApprovals')) : [];
+    const partnersCurrentState = _lsGet('partners') ? JSON.parse(_lsGet('partners')) : [];
+    
+    // Mark all as deleted first (tombstone registration)
+    if (Array.isArray(dossiersCurrentState)) {
+      for (const item of dossiersCurrentState) {
+        if (item?.id) await dsDeleteItemFromArray('dossiers', item.id, item, true);
+      }
+    }
+    if (Array.isArray(tachesCurrentState)) {
+      for (const item of tachesCurrentState) {
+        if (item?.id) await dsDeleteItemFromArray('taches', item.id, item, true);
+      }
+    }
+    if (Array.isArray(rdvsCurrentState)) {
+      for (const item of rdvsCurrentState) {
+        if (item?.id) await dsDeleteItemFromArray('rdvs', item.id, item, true);
+      }
+    }
+    if (Array.isArray(pendingCurrentState)) {
+      for (const item of pendingCurrentState) {
+        if (item?.id) await dsDeleteItemFromArray('pendingApprovals', item.id, item, true);
+      }
+    }
+    if (Array.isArray(partnersCurrentState)) {
+      for (const item of partnersCurrentState) {
+        if (item?.id) await dsDeleteItemFromArray('partners', item.id, item, true);
+      }
+    }
+    
+    // Then wipe with forceOverwrite
+    setDossiersState([]); setProdDossiers([]); dsSave("dossiers", [], {forceOverwrite: true});
+    setTachesState([]); setProdTaches([]); dsSave("taches", [], {forceOverwrite: true});
+    setRdvsState([]); setProdRdvs([]); dsSave("rdvs", [], {forceOverwrite: true});
+    setPendingApprovalsState([]); setProdPending([]); dsSave("pendingApprovals", [], {forceOverwrite: true});
+    setPartnersStateRaw([]); setProdPartners([]); dsSave("partners", [], {forceOverwrite: true});
     // -- SIRH --
     try { _lsSet("gc-sirh-presences", "[]"); dsSave("gc-sirh-presences", []).catch(() => {}); } catch (_) {}
     try { _lsSet("gc-sirh-leaves", "[]"); dsSave("gc-sirh-leaves", []).catch(() => {}); } catch (_) {}
@@ -1631,11 +1758,26 @@ export default function App() {
              .forEach(k => { try { _lsRm(k); } catch(_) {} });
     } catch(_) {}
     // -- Collaborateurs externes (réinitialiser à la liste par défaut) --
-    setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS); dsSave("partners", INITIAL_PARTNERS);
-    // FIX v151 — Effacer les tombstones lors de la réinitialisation totale
+    setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS);
+
+    const keysToWipe = [...SHARED_KEYS].filter(k => k && k !== 'users' && k !== 'gc-users' && k !== 'gc-tombstones' && k !== 'gc-wipe-registry' && k !== 'gc-factory-reset-signal');
+    const wipeOps = keysToWipe.map(key => dsWipeKey(key).catch(() => {}));
+    const syncPromises = [...wipeOps];
+    syncPromises.push(dsSave("partners", INITIAL_PARTNERS, null, { forceOverwrite: true }).catch(() => {}));
+
     try { dsClearTombstones(); } catch (_) {}
+
+    syncPromises.push(
+      dsSave('gc-factory-reset-signal', { at: Date.now(), by: currentUser?.id || 'admin' }, null, { forceOverwrite: true }).catch(() => {})
+    );
+
+    try {
+      await Promise.all(syncPromises);
+      await new Promise(r => setTimeout(r, 500));
+    } catch (_) {}
+
     setSessionLogs([]);
-    gcAlert("✅ Réinitialisation complète effectuée.\n\nToutes les données ont été effacées.\nSeul le compte Compte superviseur est conservé.\nLes partenaires de base ont été restaurés.\n\nVous allez être déconnecté.");
+    gcAlert("✅ Réinitialisation complète effectuée.\n\nToutes les données applicatives ont été effacées.\nLes comptes utilisateurs restent disponibles dans les clés \"users\" et \"gc-users\".\nLes partenaires de base ont été restaurés.\n\nVous allez être déconnecté.");
     setCurrentUser(null);
     setIsAdminMode(false);
     setScreen("cover");

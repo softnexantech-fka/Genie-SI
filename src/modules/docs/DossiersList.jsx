@@ -221,7 +221,7 @@ function CollabModal({ T, dossier, users, localUser, partners, handleSaveCollabs
 
 // ── UploadModal — DOIT être hors DossiersList pour éviter re-mount à chaque render ──
 function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploadForm, fileUploadStatus, setFileUploadStatus, uploadRef, handleFileSelect, handleSaveUpload, handleDownloadFile, handleViewFile, handleDeleteFile, saveDossierFiles, setShowUploadModal, gcDocIcon, formatDate }) {
-  const thisDossierFiles = (dossierFiles||[]).filter(f=>f.dossierId===dossier.id);
+  const thisDossierFiles = (dossierFiles||[]).filter(f=>f&&f.dossierId===dossier.id);
   return (
     <Modal title={`📎 Fichiers — ${dossier.ref}`} onClose={()=>setShowUploadModal(null)} T={T} wide>
       {thisDossierFiles.length>0&&(
@@ -235,7 +235,7 @@ function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploa
                 <div style={{color:T.textMuted,fontSize:10}}>{f.sizeStr} · {formatDate(f.uploadedAt)} · {f.uploadedByName} · Accès Niv.{f.accessLevel}+</div>
                 {f.description&&<div style={{color:T.textMuted,fontSize:10,fontStyle:"italic"}}>{f.description}</div>}
               </div>
-              {(f.accessLevel<=localUser.level||(localUser?.isAdmin || localUser?.level >= 6))?(
+              {(f.accessLevel<=(Number(localUser?.level)||0)||(localUser?.isAdmin || (Number(localUser?.level)||0) >= 6))?(
                 <div style={{display:"flex",gap:4}}>
                   <button onClick={()=>handleViewFile(f)} title="Voir / Ouvrir" style={{background:"#A855F722",border:"1px solid #A855F744",borderRadius:6,padding:"4px 8px",color:"#A855F7",cursor:"pointer",fontSize:11}}>👁️</button>
                   <button onClick={()=>handleDownloadFile(f)} title="Télécharger" style={{background:"#3B82F622",border:"1px solid #3B82F644",borderRadius:6,padding:"4px 10px",color:"#3B82F6",cursor:"pointer",fontSize:11}}>⬇ {f.downloads>0?`(${f.downloads})`:""}</button>
@@ -243,7 +243,7 @@ function UploadModal({ T, dossier, dossierFiles, localUser, uploadForm, setUploa
               ):(
                 <span style={{color:"#EF4444",fontSize:10,padding:"4px 8px"}}>🔒 Niv.{f.accessLevel}+</span>
               )}
-              {(f.uploadedBy===localUser.id||localUser.level>=4||(localUser?.isAdmin || localUser?.level >= 6))&&(
+              {(f.uploadedBy===localUser?.id||(Number(localUser?.level)||0)>=4||(localUser?.isAdmin || (Number(localUser?.level)||0) >= 6))&&(
                 <button onClick={()=>handleDeleteFile(f)} style={{background:"#EF444415",border:"1px solid #EF444444",borderRadius:6,padding:"4px 8px",color:"#EF4444",cursor:"pointer",fontSize:11}}>🗑️</button>
               )}
             </div>
@@ -307,7 +307,7 @@ export const DossiersList = React.memo(function DossiersList() {
   const [selectedDossiers, setSelectedDossiers] = useState([]); // multi-select checkboxes
   const [selectedDocs, setSelectedDocs] = useState([]); // multi-select for docs
   const [newDossierForm, setNewDossierForm] = useState({ client:"", objet:"", process:localUser.process||"O02", priority:"NORMALE", dueDate:"", amount:"", nature:"EXTERNE", submitTo:"", submitAction:"TRAITER", submitMotif:"", partnerId:"", confidentiel:false, confPass:"", confAccess:[] });
-  const [newDocForm, setNewDocForm] = useState({ titre:"", type:"DOC", process:localUser.process||"O02", description:"", nature:"INTERNE", linkedUserId:"", partnerId:"", dossierId:"", submitTo:"", submitAction:"CONSULTER", accessLevel: localUser.level, fileData:"", fileName:"", fileSize:0, fileExt:"", fileMime:"" });
+  const [newDocForm, setNewDocForm] = useState({ titre:"", type:"DOC", process:localUser.process||"O02", description:"", nature:"INTERNE", linkedUserId:"", partnerId:"", dossierId:"", submitTo:"", submitAction:"CONSULTER", accessLevel: 1, fileData:"", fileName:"", fileSize:0, fileExt:"", fileMime:"" });
   const [dossierSubTab, setDossierSubTab] = useState("dossiers");
   const [docSearch, setDocSearch] = useState("");
   const [docFilter, setDocFilter] = useState("ALL");
@@ -321,16 +321,23 @@ export const DossiersList = React.memo(function DossiersList() {
   const [showCollabModal, setShowCollabModal] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(null);
   const [showNewDossier, setShowNewDossier] = useState(false);
+  useEffect(() => {
+    const h = () => setShowNewDossier(true);
+    window.addEventListener('gc:open-new-dossier', h);
+    return () => window.removeEventListener('gc:open-new-dossier', h);
+  }, []);
   // File viewer — single file or multi-file picker
   const [showFileViewer, setShowFileViewer] = useState(null); // {files:[{src,name,mime}], idx:0}
 
   // ── Unified file open utility ─────────────────────────────────────
   // FIX v152 — Priorité serverUrl (fichier serveur) ; fallback dataUrl (cache IDB / offline)
+  // FIX FILE-URL — serverUrl peut être relatif (/api/files/xxx) → le rendre absolu
+  const _absUrl = (url) => (url && url.startsWith('/')) ? `${getProxyUrl()}${url}` : (url || null);
   const openDocFile = async (docOrFile) => {
     // 1. Fichier stocké sur le serveur → ouvrir via fetch authentifié
     if (docOrFile.serverUrl || docOrFile.serverId) {
       try {
-        const url = docOrFile.serverUrl || `${getProxyUrl()}/api/files/${docOrFile.serverId}`;
+        const url = _absUrl(docOrFile.serverUrl) || `${getProxyUrl()}/api/files/${docOrFile.serverId}`;
         const token = getJWTToken?.() || null;
         const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
         const r = await fetch(url, { headers });
@@ -377,11 +384,11 @@ export const DossiersList = React.memo(function DossiersList() {
     if (files.length === 1) { openDocFile(files[0]); return; }
     setShowFileViewer({
       files: files.map(f => ({
-        src:       f.serverUrl || f.dataUrl || f.fileData || '',
+        src:       _absUrl(f.serverUrl) || f.dataUrl || f.fileData || '',
         name:      f.name || f.fileName || f.nom || 'document',
         mime:      f.mimeType || f.fileMime || '',
         id:        f.id,
-        serverUrl: f.serverUrl || (f.serverId ? `${getProxyUrl()}/api/files/${f.serverId}` : null),
+        serverUrl: _absUrl(f.serverUrl) || (f.serverId ? `${getProxyUrl()}/api/files/${f.serverId}` : null),
       })),
       idx: 0,
     });
@@ -398,7 +405,7 @@ export const DossiersList = React.memo(function DossiersList() {
   const [showEditModal, setShowEditModal] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [deleteMotif, setDeleteMotif] = useState("");
-  const [uploadForm, setUploadForm] = useState({ description:"", accessLevel:localUser.level, fileName:"", fileData:"", fileSize:0, fileExt:"", fileMime:"" });
+  const [uploadForm, setUploadForm] = useState({ description:"", accessLevel:1, fileName:"", fileData:"", fileSize:0, fileExt:"", fileMime:"" });
   const uploadRef = useRef(null);
 
   const NATURE_CONFIG = {
@@ -583,6 +590,8 @@ export const DossiersList = React.memo(function DossiersList() {
           if (linkedRdvs.length > 0)   setRdvs(prev => { const u=prev.map(r=>r.dossierId===d.id?{...r,dossierId:null,dossierDetached:true}:r); dsSave("rdvs",u,null,{forceOverwrite:false}).catch(err => gcToast.syncError('', err)); return u; });
         }
       }
+      // Cascade Finance — annuler les factures liées au dossier
+      window.dispatchEvent(new CustomEvent('gc:dossier-deleted', { detail: { id: d.id, ref: d.ref, client: d.client } }));
       addSessionLog && addSessionLog("SUPPRESSION", localUser, { status:"SUCCESS", reason:`Suppression dossier ${d.ref}` });
       setNotifications(prev=>[{id:"N"+Date.now(),icon:"🗑️",message:`Dossier ${d.ref} supprimé par ${localUser.name}`,at:new Date().toISOString(),read:false},...prev]);
       playSound("success");
@@ -618,6 +627,7 @@ export const DossiersList = React.memo(function DossiersList() {
     });
     saveDossierFiles(prev=>prev.filter(f=>f.dossierId!==req.dossierId));
     savePendingDeleteApprovals(prev=>prev.map(r=>r.id===req.id?{...r,status:"APPROUVE",approvedAt:new Date().toISOString(),approvedBy:localUser.id}:r));
+    window.dispatchEvent(new CustomEvent('gc:dossier-deleted', { detail: { id: req.dossierId, ref: req.dossierRef, client: req.dossierClient } }));
     setNotifications(prev=>[{id:"N"+Date.now(),icon:"✅",message:`✅ Suppression approuvée : ${req.dossierRef} (demandé par ${req.requestedByName})`,at:new Date().toISOString(),read:false},...prev]);
     addSessionLog && addSessionLog("SUPPRESSION", localUser, { status:"SUCCESS", reason:`Suppression approuvée dossier ${req.dossierRef}` });
     setShowDeleteReview(null); playSound("success");
@@ -723,7 +733,7 @@ export const DossiersList = React.memo(function DossiersList() {
     setNotifications(prev=>[{id:"N"+Date.now(),icon:"📎",message:`Fichier ajouté : "${newFile.name}" → Dossier ${d.ref}`,at:new Date().toISOString(),read:false},...prev]);
     addSessionLog && addSessionLog("UPLOAD", localUser, { status:"SUCCESS", reason:`Upload "${newFile.name}" — ${d.ref}` });
     setShowUploadModal(null);
-    setUploadForm({description:"",accessLevel:localUser.level,fileName:"",fileData:"",fileSize:0,fileExt:"",fileMime:""});
+    setUploadForm({description:"",accessLevel:1,fileName:"",fileData:"",fileSize:0,fileExt:"",fileMime:""});
     setFileUploadStatus(null);
     playSound("success");
   };
@@ -739,14 +749,15 @@ export const DossiersList = React.memo(function DossiersList() {
 
   // FIX v152 — handleDownloadFile : priorité serverUrl, fallback dataUrl
   const handleDownloadFile = async (f) => {
-    if (f.accessLevel > localUser.level && !(localUser?.isAdmin || localUser?.level >= 6) && !isMG) {
+    const _userLevel = Number(localUser?.level) || 0;
+    if (f.accessLevel > _userLevel && !(localUser?.isAdmin || _userLevel >= 6) && !isMG) {
       gcAlert("Accès refusé — Habilitation insuffisante."); return;
     }
     saveDossierFiles(prev => prev.map(x => x.id === f.id ? { ...x, downloads: (x.downloads || 0) + 1 } : x));
     // 1. Téléchargement depuis le serveur (fichiers uploadés)
     if (f.serverUrl || f.serverId) {
       try {
-        const url = f.serverUrl || `${getProxyUrl()}/api/files/${f.serverId}`;
+        const url = _absUrl(f.serverUrl) || `${getProxyUrl()}/api/files/${f.serverId}`;
         const token = getJWTToken?.() || null;
         const headers = token ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` } : {};
         const r = await fetch(url, { headers });
@@ -793,22 +804,23 @@ export const DossiersList = React.memo(function DossiersList() {
   // Niv 2 : voient uniquement les dossiers qui les concernent directement
   const canSeeAll = localUser.level >= 4 || (localUser?.isAdmin || localUser?.level >= 6);
 
-  const userDossiers = canSeeAll ? dossiers :
+  const userDossiers = canSeeAll ? dossiers.filter(Boolean) :
     localUser.level >= 3
       ? dossiers.filter(d =>
-          // Niv3 : voit son processus + ceux assignés + TOUS les autres en lecture seule
-          d.assignedTo === localUser.id ||
+          d &&
+          (d.assignedTo === localUser.id ||
           d.createdBy === localUser.id ||
           d.submittedTo === localUser.id ||
           (d.collaborators || []).includes(localUser.id) ||
           myProcs.includes(d.process) ||
-          true // niv 3+ voit tous les dossiers en lecture
+          true) // niv 3+ voit tous les dossiers en lecture
         )
       : dossiers.filter(d =>
-          d.assignedTo === localUser.id ||
+          d &&
+          (d.assignedTo === localUser.id ||
           d.createdBy === localUser.id ||
           d.submittedTo === localUser.id ||
-          (d.collaborators || []).includes(localUser.id)
+          (d.collaborators || []).includes(localUser.id))
         );
 
   // -- Droits d'action granulaires -----------------------------------------
@@ -821,13 +833,8 @@ export const DossiersList = React.memo(function DossiersList() {
   const canDeleteDossier = (d) => {
     // Admin : toujours
     if ((localUser?.isAdmin || localUser?.level >= 6)) return true;
-    // DG/Niv5 : toujours
+    // DG/Niv5 : toujours (suppression totale dossier réservée niv 5+)
     if (localUser.level >= 5) return true;
-    // Niv 4 dans son processus (ou O01)
-    if (localUser.level >= 4 && (myProcs.includes(d.process) || isO01)) return true;
-    // Créateur ou assigné : peut supprimer si le dossier n'est pas encore validé/terminé
-    if ((d.createdBy === localUser.id || d.assignedTo === localUser.id)
-        && ["ATTENTE_TRAITEMENT","EN_COURS","REJETE"].includes(d.status)) return true;
     return false;
   };
 
@@ -888,10 +895,10 @@ export const DossiersList = React.memo(function DossiersList() {
   };
 
   const filtered = userDossiers.filter(d=>
-    // v99 — filtre KYC_ATTENTE
+    d &&
     (filter==="ALL"||(filter==="KYC_ATTENTE"&&d.intakeDocs?.length>0&&d.kycStatutDossier!=="VALIDE")||(filter!=="ALL"&&filter!=="KYC_ATTENTE"&&d.status===filter))&&
     (dosType==="ALL"||(d.nature||"EXTERNE")===dosType)&&
-    (!search||d.client.toLowerCase().includes(search.toLowerCase())||d.ref.toLowerCase().includes(search.toLowerCase())||(d.objet||"").toLowerCase().includes(search.toLowerCase()))
+    (!search||(d.client||"").toLowerCase().includes(search.toLowerCase())||(d.ref||"").toLowerCase().includes(search.toLowerCase())||(d.objet||"").toLowerCase().includes(search.toLowerCase()))
   );
 
   const pendingReviewForMe = (pendingDeleteApprovals||[]).filter(r=>r.superiorId===localUser.id&&r.status==="EN_ATTENTE");
@@ -902,34 +909,37 @@ export const DossiersList = React.memo(function DossiersList() {
 
   const _docMyProcs = localUser.processes || [localUser.process];
   const visibleStandaloneDocs = (standaloneDocuments||[]).filter(doc => {
+    if (!doc) return false;
     if ((localUser?.isAdmin || localUser?.level >= 6) || localUser.level >= 4) return true;
     if (doc.accessLevel && doc.accessLevel > localUser.level) return false;
     if (localUser.level >= 3) return _docMyProcs.includes(doc.process) || doc.createdBy === localUser.id || doc.submitTo === localUser.id || doc.linkedUserId === localUser.id;
     return doc.createdBy === localUser.id || doc.submitTo === localUser.id || doc.linkedUserId === localUser.id;
   });
   const visibleDossierFiles = (dossierFiles||[]).filter(f => {
+    if (!f) return false;
     if ((localUser?.isAdmin || localUser?.level >= 6) || localUser.level >= 4) return true;
     if (f.accessLevel && f.accessLevel > localUser.level) return false;
-    const parentDossier = userDossiers.find(d => d.id === f.dossierId);
+    const parentDossier = userDossiers.find(d => d && d.id === f.dossierId);
     return !!parentDossier || f.uploadedBy === localUser.id;
   });
   const allDocs = [
     ...visibleStandaloneDocs.map(d=>({...d, _src:"standalone"})),
     ...visibleDossierFiles.map(f=>({...f, _src:"dossierFile", titre:f.name, nature:f.dossierId?"EXTERNE":"INTERNE", createdAt:f.uploadedAt, createdByName:f.uploadedByName, createdBy:f.uploadedBy}))
-  ].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||""));
+  ].sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
 
+  const _str = (v) => typeof v === "string" ? v : v ? String(v) : "";
   const filteredDocs = allDocs.filter(doc => {
     const q = docSearch.toLowerCase();
-    const matchSearch = !q || (doc.titre||"").toLowerCase().includes(q) || (doc.description||"").toLowerCase().includes(q) || (doc.process||"").toLowerCase().includes(q) || (doc.partnerNom||doc.dossierRef||"").toLowerCase().includes(q) || (doc.createdByName||"").toLowerCase().includes(q) || (doc.type||"").toLowerCase().includes(q);
+    const matchSearch = !q || (_str(doc.titre)).toLowerCase().includes(q) || (_str(doc.description)).toLowerCase().includes(q) || (_str(doc.process)).toLowerCase().includes(q) || (_str(doc.partnerNom||doc.dossierRef)).toLowerCase().includes(q) || (_str(doc.createdByName)).toLowerCase().includes(q) || (_str(doc.type)).toLowerCase().includes(q);
     const matchNature = docFilter==="ALL" || (doc.nature||"INTERNE")===docFilter;
     const matchType = docTypeFilter==="ALL" || (doc.type||"DOC")===docTypeFilter;
     const matchProc = docProcessFilter==="ALL" || (doc.process||"")===docProcessFilter;
     return matchSearch && matchNature && matchType && matchProc;
   }).sort((a,b)=>{
-    if (docSort==="date_desc") return (b.createdAt||"").localeCompare(a.createdAt||"");
-    if (docSort==="date_asc") return (a.createdAt||"").localeCompare(b.createdAt||"");
-    if (docSort==="titre_asc") return (a.titre||"").localeCompare(b.titre||"");
-    if (docSort==="titre_desc") return (b.titre||"").localeCompare(a.titre||"");
+    if (docSort==="date_desc") return _str(b.createdAt).localeCompare(_str(a.createdAt));
+    if (docSort==="date_asc") return _str(a.createdAt).localeCompare(_str(b.createdAt));
+    if (docSort==="titre_asc") return _str(a.titre).localeCompare(_str(b.titre));
+    if (docSort==="titre_desc") return _str(b.titre).localeCompare(_str(a.titre));
     if (docSort==="size_desc") return (b.fileSize||0)-(a.fileSize||0);
     return 0;
   });

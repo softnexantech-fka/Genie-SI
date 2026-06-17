@@ -38,27 +38,91 @@ import { GC_FISCAL_CONFIG_DEFAULT } from '../../core/constants.js';
 
 const AUTO_BACKUP_KEY = 'gc-auto-backup-latest';
 
-export const gcBuildBackupPayload = (data) => ({
-  version: 'GC_SI_v57',
-  exportedAt: new Date().toISOString(),
-  exportedBy: data.userName || 'Admin',
-  meta: {
-    users:    data.users?.length    || 0,
-    dossiers: data.dossiers?.length || 0,
-    taches:   data.taches?.length   || 0,
-  },
-  data: {
-    users:            data.users            || [],
-    dossiers:         data.dossiers         || [],
-    taches:           data.taches           || [],
-    rdvs:             data.rdvs             || [],
-    partners:         data.partners         || [],
-    pendingApprovals: data.pendingApprovals || [],
-    journal:          data.journal          || [],
-    sessionLogs:      (data.sessionLogs || []).slice(0, 500),
-    // siAppearance intentionnellement absent (logos base64 → fichier énorme)
-  },
-});
+// Strip base64 file data from dossierFiles to keep backup size reasonable
+const _stripFileData = (files) => {
+  if (!Array.isArray(files)) return [];
+  return files.map(f => {
+    const { dataUrl, fileData, base64, content, ...rest } = f;
+    return rest;
+  });
+};
+
+const _lsParseArray = (key) => {
+  try { const r = _lsGet(key); return r ? JSON.parse(r) : []; } catch (_) { return []; }
+};
+
+export const gcBuildBackupPayload = (data) => {
+  // Lecture des clés module depuis localStorage
+  const dossierFiles    = _stripFileData(_lsParseArray('gc-dossier-files'));
+  const standaloneDocs  = _lsParseArray('gc-standalone-docs');
+  const docsUnified     = _lsParseArray('gc-docs-unified');
+  const siDocs          = _lsParseArray('gc-si-docs');
+  const internalDocs    = _lsParseArray('gc-internal-docs');
+  const externalDocs    = _lsParseArray('gc-external-docs');
+  const factures        = _lsParseArray('gc-factures');
+  const budget          = _lsParseArray('gc-budget');
+  const risks           = _lsParseArray('gc-risks');
+  const auditChecklist  = _lsParseArray('gc-audit-checklist');
+  const auditProg       = _lsParseArray('gc-audit-prog');
+  const crmRelances     = _lsParseArray('gc-crm-relances');
+  const crmInteractions = _lsParseArray('gc-crm-interactions');
+  const crmOpps         = _lsParseArray('gc-crm-opps');
+  const jurKyc          = _lsParseArray('gc-jur-kyc');
+  const jurDocs         = _lsParseArray('gc-jur-docs');
+  const stocks          = _lsParseArray('gc-stocks');
+  const achats          = _lsParseArray('gc-achats');
+  const logStocks       = _lsParseArray('gc-logmod-stocks');
+
+  return {
+    version: 'GC_SI_v58',
+    exportedAt: new Date().toISOString(),
+    exportedBy: data.userName || 'Admin',
+    meta: {
+      users:         data.users?.length    || 0,
+      dossiers:      data.dossiers?.length || 0,
+      taches:        data.taches?.length   || 0,
+      dossierFiles:  dossierFiles.length,
+      factures:      factures.length,
+      docs:          (standaloneDocs.length + docsUnified.length + internalDocs.length + externalDocs.length),
+    },
+    data: {
+      users:            data.users            || [],
+      dossiers:         data.dossiers         || [],
+      taches:           data.taches           || [],
+      rdvs:             data.rdvs             || [],
+      partners:         data.partners         || [],
+      pendingApprovals: data.pendingApprovals || [],
+      journal:          data.journal          || [],
+      sessionLogs:      (data.sessionLogs || []).slice(0, 500),
+      // Documents & fichiers (base64 supprimé pour réduire la taille)
+      dossierFiles,
+      standaloneDocs,
+      docsUnified,
+      siDocs,
+      internalDocs,
+      externalDocs,
+      // Finance
+      factures,
+      budget,
+      // Risques & Audit
+      risks,
+      auditChecklist,
+      auditProg,
+      // CRM
+      crmRelances,
+      crmInteractions,
+      crmOpps,
+      // Juridique
+      jurKyc,
+      jurDocs,
+      // Logistique
+      stocks,
+      achats,
+      logStocks,
+      // siAppearance intentionnellement absent (logos base64 → fichier énorme)
+    },
+  };
+};
 
 export const gcSaveAutoBackup = (backup) => {
   try {
@@ -285,6 +349,7 @@ export function FiscalConfigPanel({ T, currentUser }) {
   const reset = async () => {
     if (!await gcConfirm('Réinitialiser aux taux officiels Gabon 2026 ?')) return;
     _lsRm('gc-fiscal-config');
+    dsSave('gc-fiscal-config', GC_FISCAL_CONFIG_DEFAULT, null, { forceOverwrite: true }).catch(() => {});
     setCfg(GC_FISCAL_CONFIG_DEFAULT);
     setSaved(false);
   };
@@ -433,6 +498,27 @@ export function ExportBackupPanel({
     if (d.partners && setPartners)         { lsSave('partners', d.partners);         setPartners(d.partners);         await dsSave('partners', d.partners); }
     if (d.pendingApprovals && setPendingApprovals) { lsSave('pendingApprovals', d.pendingApprovals); setPendingApprovals(d.pendingApprovals); await dsSave('pendingApprovals', d.pendingApprovals); }
     if (d.journal) { try { _lsSet('gc-journal', JSON.stringify(d.journal)); dsSave('gc-journal', d.journal).catch(err => gcToast.syncError('gc-journal', err)); } catch(_){} }
+    // Restauration docs & fichiers (métadonnées seulement, pas de base64)
+    const _restoreKey = (key, val) => { try { if (Array.isArray(val) && val.length) { _lsSet(key, JSON.stringify(val)); dsSave(key, val).catch(() => {}); } } catch(_){} };
+    _restoreKey('gc-dossier-files',    d.dossierFiles);
+    _restoreKey('gc-standalone-docs',  d.standaloneDocs);
+    _restoreKey('gc-docs-unified',     d.docsUnified);
+    _restoreKey('gc-si-docs',          d.siDocs);
+    _restoreKey('gc-internal-docs',    d.internalDocs);
+    _restoreKey('gc-external-docs',    d.externalDocs);
+    _restoreKey('gc-factures',         d.factures);
+    _restoreKey('gc-budget',           d.budget);
+    _restoreKey('gc-risks',            d.risks);
+    _restoreKey('gc-audit-checklist',  d.auditChecklist);
+    _restoreKey('gc-audit-prog',       d.auditProg);
+    _restoreKey('gc-crm-relances',     d.crmRelances);
+    _restoreKey('gc-crm-interactions', d.crmInteractions);
+    _restoreKey('gc-crm-opps',         d.crmOpps);
+    _restoreKey('gc-jur-kyc',          d.jurKyc);
+    _restoreKey('gc-jur-docs',         d.jurDocs);
+    _restoreKey('gc-stocks',           d.stocks);
+    _restoreKey('gc-achats',           d.achats);
+    _restoreKey('gc-logmod-stocks',    d.logStocks);
     setImportMsg('⏳ Synchronisation comptes serveur...');
     try { await gcSyncAuthUsers(); } catch (_) {}
   };
@@ -440,7 +526,7 @@ export function ExportBackupPanel({
   const handleExport = () => {
     const meta = gcExportFullBackup({ userName: currentUser?.name||'Admin', users, dossiers, taches, rdvs, partners, pendingApprovals,
       journal: (() => { try { return JSON.parse(_lsGet('gc-journal')||'[]'); } catch(_){return[];} })(), sessionLogs, siAppearance });
-    gcAlert(`✅ Export réussi !\n${meta.users} utilisateurs · ${meta.dossiers} dossiers · ${meta.taches} tâches`);
+    gcAlert(`✅ Export réussi !\n${meta.users} utilisateurs · ${meta.dossiers} dossiers · ${meta.taches} tâches · ${meta.factures} factures · ${meta.docs} docs · ${meta.dossierFiles} fichiers`);
   };
 
   const handleImport = async (e) => {
@@ -453,7 +539,7 @@ export function ExportBackupPanel({
           await applyBackup(backup);
           gcSaveAutoBackup(backup); setAutoBackupMeta(gcGetLatestAutoBackupMeta());
           const d = backup.data || {};
-          setImportMsg(`✅ Import réussi ! ${d.users?.length||0} util. · ${d.dossiers?.length||0} dossiers · ${d.taches?.length||0} tâches. Rechargez.`);
+          setImportMsg(`✅ Import réussi ! ${d.users?.length||0} util. · ${d.dossiers?.length||0} dossiers · ${d.taches?.length||0} tâches · ${d.factures?.length||0} factures · ${(d.dossierFiles?.length||0)} fichiers. Rechargez.`);
         } catch (err) { setImportMsg('❌ Erreur : ' + err.message); }
         setImporting(false);
       },
@@ -466,7 +552,7 @@ export function ExportBackupPanel({
     const payload = gcBuildBackupPayload({ userName: currentUser?.name||'Admin', users, dossiers, taches, rdvs, partners, pendingApprovals,
       journal: (() => { try { return JSON.parse(_lsGet('gc-journal')||'[]'); } catch(_){return[];} })(), sessionLogs });
     const meta = gcSaveAutoBackup(payload); setAutoBackupMeta(meta);
-    gcAlert(`✅ Snapshot local enregistré.\n${meta.users} util. · ${meta.dossiers} dossiers · ${meta.taches} tâches`);
+    gcAlert(`✅ Snapshot local enregistré.\n${meta.users} util. · ${meta.dossiers} dossiers · ${meta.taches} tâches · ${meta.factures||0} factures · ${meta.docs||0} docs`);
   };
 
   const handleRestoreLocal = async () => {
@@ -1000,6 +1086,33 @@ export function SyncControlPanel({ T, currentUser }) {
           <button disabled={!!loading} onClick={handleSyncIdbFiles}
             style={{ background:'#8B5CF622', border:'1px solid #8B5CF644', color:'#8B5CF6', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
             {loading==='idb' ? '⏳ Sync...' : '📁 Sync fichiers hors ligne (IDB)'}
+          </button>
+          <button disabled={!!loading} onClick={async () => {
+            if (!await _dlg.confirm('Reconstruire l\'index fichiers depuis la base serveur ?\n\nUtile si des fichiers sont présents sur le serveur mais ne s\'affichent pas chez certains utilisateurs. L\'opération sera broadcastée à tous les postes.', 'Rebuild index fichiers', null, false)) return;
+            setLoading('rebuild-kv');
+            addLog('Reconstruction index gc-dossier-files...', 'info');
+            try {
+              const tok = _lsGet('gc-jwt-token') || _lsGet('authToken') || _lsGet('token') || '';
+              const proxyUrl = status?.proxyUrl || 'http://localhost:3001';
+              const r = await fetch(`${proxyUrl}/api/files/rebuild-kv`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+                signal: AbortSignal.timeout(30000),
+              });
+              if (r.ok) {
+                const data = await r.json();
+                addLog(`✅ Index fichiers reconstruit : ${data.count} fichiers indexés — broadcast envoyé à tous les postes`, 'success');
+                playSound('success');
+                gcToast.success(`${data.count} fichiers réindexés — les fichiers seront à nouveau visibles partout`);
+              } else {
+                const err = await r.json().catch(() => ({}));
+                addLog(`Erreur rebuild : ${err.error || r.status}`, 'error');
+              }
+            } catch (e) { addLog(`Erreur : ${e.message}`, 'error'); }
+            setLoading('');
+          }}
+            style={{ background:'#C41E3A22', border:'1px solid #C41E3A44', color:'#C41E3A', borderRadius:8, padding:'8px 10px', cursor:loading?'not-allowed':'pointer', fontWeight:700, fontSize:11 }}>
+            {loading==='rebuild-kv' ? '⏳ Rebuild...' : '🗂️ Réparer index fichiers (tous postes)'}
           </button>
         </div>
       </div>

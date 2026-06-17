@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../../components/Dialog.jsx';
 import { FileUploader, SingleFileUploader } from '../../components/FileUploader.jsx';
 // FinanceApp.jsx — SI Génie Consultant v127
-import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet } from '../../core/index.js';
+import { _lsGet, _lsSet, _lsRm, lsLoad, lsSave, _noop, gcPushNotif, playSound, gcCalcIRPP, gcLoadFiscalConfig, gcGetDelaiConfig, gcAntiRedondance, gcFileSave, _activeUser, lsLoadSecure, gcHashPassword, gcVerifyPassword, gcGenerateSessionToken, gcValidateSessionToken, SIErrorBoundary, gcGetClientIp, _gcCachedIp, gcAIAsk, dsSave, gcSyncAuthUsers, dsDeleteItemFromArray, dsGet, dsWipeKey, dsClearTombstones, SHARED_KEYS } from '../../core/index.js';
 import { useRemoteSync } from '../../hooks/useSyncedState.js';
 import { THEMES, INITIAL_DOSSIERS, INITIAL_TACHES, INITIAL_RDVS, INITIAL_PENDING, INITIAL_PARTNERS, INITIAL_USERS, INITIAL_SI_SYSTEM_DOCS, USER_FUNCTIONS, PLAN_COMPTABLE_OHADA, DEMO_USERS, DEMO_DOSSIERS, DEMO_RDVS, DEMO_TACHES, INITIAL_ACCOUNT_ACTIONS, INITIAL_SESSION_LOGS, ACCOUNT_STATUS_CONFIG, DEMO_PENDING, GC_FISCAL_CONFIG_DEFAULT, gcViewDoc, gcDownloadDoc } from '../../core/constants.js';
 import { Btn, Modal, InputField, SelectField, PrintButton, QRDisplay, Tabs, NationaliteField, SmartBanner } from '../../components/UI.jsx';
@@ -302,6 +302,27 @@ export function FacturationModule({ T, currentUser, dossiers=[], partners=[], jo
       try { window.dispatchEvent(new StorageEvent("storage", {key:"gc-factures", newValue:json})); } catch(_) {}
     } catch(_) {}
   };
+
+  // Cascade dossier supprimé → annuler les factures liées
+  React.useEffect(() => {
+    const handler = (e) => {
+      const { id: dossierId, ref: dossierRef } = e.detail || {};
+      if (!dossierId && !dossierRef) return;
+      setFactures(prev => {
+        const updated = prev.map(f =>
+          (f.dossierId === dossierId || f.dossierRef === dossierRef) && f.status !== "ANNULEE"
+            ? { ...f, status: "ANNULEE", annuleAt: new Date().toISOString(), annuleRaison: `Dossier ${dossierRef} supprimé` }
+            : f
+        );
+        if (updated.some((f,i) => f !== prev[i])) {
+          try { const j = JSON.stringify(updated.slice(0,500)); _lsSet("gc-factures", j); dsSave("gc-factures", JSON.parse(j)).catch(() => {}); } catch(_) {}
+        }
+        return updated;
+      });
+    };
+    window.addEventListener('gc:dossier-deleted', handler);
+    return () => window.removeEventListener('gc:dossier-deleted', handler);
+  }, []);
 
   const factInit = {
     client:"", objet:"", dossierId:"", dossierRef:"", montantHT:"", taux:"18",
@@ -864,6 +885,9 @@ export function FacturationModule({ T, currentUser, dossiers=[], partners=[], jo
               )}
               {isLvl4 && f.status!=="ANNULEE" && (
                 <button onClick={async () => {if(await gcConfirm(`Annuler la facture ${f.ref} ?`))saveFactures(factures.map(x=>x.id===f.id?{...x,status:"ANNULEE",annuleAt:new Date().toISOString()}:x))}} style={{background:"#9CA3AF22",border:"1px solid #9CA3AF44",color:"#9CA3AF",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>❌ Annuler</button>
+              )}
+              {isLvl5 && (
+                <button onClick={async () => {if(await gcConfirm(`Supprimer définitivement la facture ${f.ref} ? Action irréversible.`,"Suppression définitive","⚠️",true))saveFactures(factures.filter(x=>x.id!==f.id))}} style={{background:"#EF444415",border:"1px solid #EF444444",color:"#EF4444",borderRadius:6,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700}}>🗑️ Purger</button>
               )}
             </div>
           </div>
@@ -1968,7 +1992,11 @@ export default function App() {
   const saveAppHabilitations = useCallback((v) => {
     setAppHabilitations(prev => {
       const resolved = typeof v === 'function' ? v(prev) : v;
-      try { _lsSet("gc-app-habilitations", JSON.stringify(resolved)); dsSave("gc-app-habilitations", resolved).catch(err => gcToast.syncError('', err)); } catch (_) {}
+      const resolvedJson = JSON.stringify(resolved);
+      try { _lsSet("gc-app-habilitations", resolvedJson); } catch (_) {}
+      if (resolvedJson !== JSON.stringify(prev)) {
+        dsSave("gc-app-habilitations", resolved).catch(err => gcToast.syncError('', err));
+      }
       return resolved;
     });
   }, []);
@@ -2170,14 +2198,17 @@ export default function App() {
   };
 
   const handleFactoryReset = async () => {
-    const confirmed = await gcConfirm("⚠️ RÉINITIALISATION TOTALE DU SI\n\nCela effacera L'INTÉGRALITÉ des données :\n• Tous les utilisateurs (y compris les données par défaut)\n• Tous les dossiers, documents, tâches, RDV\n• Tous les partenaires, recrutements, présences, congés\n• Toutes les codifications, journaux, configurations\n\nSeul le compte Compte superviseur sera conservé.\n\nCETTE ACTION EST IRRÉVERSIBLE.\n\nConfirmez-vous ?");
+    const confirmed = await gcConfirm("⚠️ RÉINITIALISATION TOTALE DU SI\n\nCela effacera L'INTÉGRALITÉ des données applicatives :\n• Tous les dossiers, documents, tâches, RDV\n• Tous les partenaires, recrutements, présences, congés\n• Toutes les codifications, journaux, configurations\n\nLes données de compte utilisateur stockées dans les clés \"users\" et \"gc-users\" seront conservées.\n\nCETTE ACTION EST IRRÉVERSIBLE.\n\nConfirmez-vous ?");
     if (!confirmed) return;
     const code = await gcPrompt("Saisir le code de confirmation : RESET-GC-SI");
     if ((code||"").trim() !== "RESET-GC-SI") { gcAlert("❌ Code incorrect. Réinitialisation annulée."); return; }
     // FIX v92 Bug#7d — Object.keys() snapshot complet, évite décalage d'index pendant suppression
-    const keysToDelete = Object.keys(localStorage).filter(
-      k => k && (k.startsWith("GC_SI") || k.startsWith("gc-") || k.startsWith("gc_"))
-    );
+    const keysToDelete = Object.keys(localStorage).filter((k) => {
+      if (!k) return false;
+      if (k === "users" || k === "gc-users") return false;
+      if (k.endsWith(":users") || k.endsWith(":gc-users")) return false;
+      return k.startsWith("GC_SI") || k.startsWith("gc-") || k.startsWith("gc_");
+    });
     keysToDelete.forEach(k => { try { _lsRm(k); } catch (_) {} });
     const adminOnly = [{ ...INITIAL_USERS[0] }]; // uniquement USR-ADM-000
     setUsersState(adminOnly); setProdUsers(adminOnly); lsSave("users", adminOnly);
@@ -2186,43 +2217,15 @@ export default function App() {
     setRdvsState([]); setProdRdvs([]); lsSave("rdvs", []);
     setPendingApprovalsState([]); setProdPending([]); lsSave("pendingApprovals", []);
     setPartnersStateRaw([]); setProdPartners([]); lsSave("partners", []);
-    // -- SIRH --
-    try { _lsSet("gc-sirh-presences","[]"); dsSave("gc-sirh-presences",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-sirh-leaves","[]"); dsSave("gc-sirh-leaves",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-sirh-recrutements","[]"); dsSave("gc-sirh-recrutements",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-sirh-evaluations","[]"); dsSave("gc-sirh-evaluations",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-paie-transferts", "[]"); } catch (_) {}
-    // -- Documents --
-    try { _lsSet("gc-internal-docs","[]"); dsSave("gc-internal-docs",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-external-docs","[]"); dsSave("gc-external-docs",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-dossier-files", "[]"); } catch (_) {}
-    // -- Messagerie --
-    try { _lsSet("gc-messages-global", "[]"); } catch (_) {}
-    try { _lsSet("gc-courrier-docs", "[]"); } catch (_) {}
-    // -- Journaux --
-    try { _lsSet("gc-session-logs","[]"); dsSave("gc-session-logs",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-account-actions","[]"); dsSave("gc-account-actions",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    try { _lsSet("gc-error-log", "[]"); } catch (_) {}
-    // -- Accès --
-    try { _lsRm("gc-pending-connections"); } catch (_) {}
-    try { _lsRm("gc-app-habilitations"); } catch (_) {}
-    try { _lsRm("gc-app-access-codes"); } catch (_) {}
-    // -- Codification & Archivage --
-    try { _lsSet("gc-codif-registry","[]"); dsSave("gc-codif-registry",[]).catch(err => gcToast.syncError('', err)); } catch(_) {}
-    // -- Productivité --
-    try { _lsRm("gc-kanban-cols-v2"); } catch (_) {}
-    try { _lsRm("gc-kanban-cards-v2"); } catch (_) {}
-    try { _lsRm("gc-notes-rapides"); } catch (_) {}
-    try { _lsRm("gc-notepad-v2"); } catch (_) {}
-    try { _lsRm("gc-memos"); } catch (_) {}
-    try { _lsRm("gc-tableur-pro"); } catch (_) {}
-    try { _lsRm("gc-alarms-v2"); } catch (_) {}
-    try { _lsRm("gc-widget-alarms"); } catch (_) {}
-    try { _lsRm("gc-demandes"); } catch (_) {}
-    try { _lsRm("gc-archives"); } catch (_) {}
-    try { _lsRm("gc-standalone-docs"); } catch (_) {}
-    try { _lsRm("gc-security-alerts"); } catch (_) {}
-    try { _lsRm("gc-system-msgs"); } catch (_) {}    // FIX v72 — Messages système (persistés depuis v72)
+    // -- Wipe serveur + wipe-registry (propagation cross-machine + anti-résurrection) --
+    const sharedKeysToWipe = [...SHARED_KEYS].filter(k => k && k !== 'users' && k !== 'gc-users' && k !== 'gc-tombstones' && k !== 'gc-wipe-registry' && k !== 'gc-factory-reset-signal');
+    const syncPromises = sharedKeysToWipe.map(key => dsWipeKey(key).catch(() => {}));
+    syncPromises.push(dsSave("partners", INITIAL_PARTNERS, null, { forceOverwrite: true }).catch(() => {}));
+    try { dsClearTombstones(); } catch (_) {}
+    syncPromises.push(
+      dsSave('gc-factory-reset-signal', { at: Date.now(), by: currentUser?.id || 'admin' }, null, { forceOverwrite: true }).catch(() => {})
+    );
+    await Promise.allSettled(syncPromises);
     // -- Badges "vu" sidebar (tous utilisateurs) --
     // FIX v92 Bug#7 — Snapshot complet des clés AVANT suppression (évite décalage d'index)
     try {
@@ -2239,7 +2242,7 @@ export default function App() {
     // -- Collaborateurs externes (réinitialiser à la liste par défaut) --
     setPartnersStateRaw(INITIAL_PARTNERS); setProdPartners(INITIAL_PARTNERS); lsSave("partners", INITIAL_PARTNERS);
     setSessionLogs([]);
-    gcAlert("✅ Réinitialisation complète effectuée.\n\nToutes les données ont été effacées.\nSeul le compte Compte superviseur est conservé.\nLes partenaires de base ont été restaurés.\n\nVous allez être déconnecté.");
+    gcAlert("✅ Réinitialisation complète effectuée.\n\nToutes les données applicatives ont été effacées.\nLes comptes utilisateurs restent disponibles dans les clés \"users\" et \"gc-users\".\nLes partenaires de base ont été restaurés.\n\nVous allez être déconnecté.");
     setCurrentUser(null);
     setIsAdminMode(false);
     setScreen("cover");

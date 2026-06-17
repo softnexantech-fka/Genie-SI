@@ -538,20 +538,135 @@ const handleValidationErrors = (req, res, next) => {
 
 // ── Utilisateurs par défaut au démarrage ────────────────────────────────────
 // [FIX-INIT-USERS] Initialiser avec au minimum le compte admin au démarrage
+// [FIX-v2-USERS] Tous les 14 comptes avec leurs hashes SHA-256 précalculés
+// Hash = SHA256(mot_de_passe + "GC_SALT_2026_GABON")
+// Mots de passe par défaut = 6 derniers caractères de l'ID (ex: USR-S01-5763 → "1-5763")
+// Exception : USR-S02-0571 (fkastanh) a changé son mdp → "fkastanh@30"
+// Comptes système : USR-ADM-000 (Admin@SI#2026!) / USR-DG-001 (mdp DG personnel)
 const DEFAULT_INITIAL_USERS = [
   {
     id: "USR-ADM-000", name: "Superviseur SI", alias: "admin.si", role: "Direction SI",
-    dept: "Système d'Information", process: "ALL", level: 6, avatar: "AD", color: "#C41E3A",
+    dept: "Système d'Information", process: "ALL", processes: ["ALL"], level: 6, avatar: "AD", color: "#C41E3A",
     isAdmin: true, accountStatus: "ACTIF", isActive: true,
     email: "admin@genie-consultant.com", adresse: "Siège Social",
-    passwordHash: "",  // Will be set during hydration
+    bio: "Compte d'administration système du SI Génie Consultant.",
+    passwordHash: "947adf4731ce63781262f5eaa4bcf7b304bfa2b4b899db3275b81f6de74eff89", // Admin@SI#2026!
   },
   {
-    id: "USR-DG-001", name: "Directeur Général", alias: "dg.genie", role: "Directeur Général",
-    dept: "Direction Générale", process: "P01", level: 5, avatar: "DG", color: "#C9A84C",
-    isMG: true, accountStatus: "ACTIF", isActive: true,
+    id: "USR-DG-001", name: "GILLES LEPEBE", alias: "dg.genie", role: "Directeur Général",
+    dept: "Direction Générale", process: "P01", processes: ["P01","P02","P03","P04"], level: 5, avatar: "DG", color: "#C9A84C",
+    isMG: true, accountStatus: "ACTIF", isActive: true, sexe: "M", nationalite: "Gabonaise",
     email: "dg@genie-consultant.com", adresse: "Direction Générale",
-    passwordHash: "",  // Will be set during hydration
+    bio: "Compte Directeur Général. Veuillez configurer votre profil à la première connexion.",
+    passwordHash: "ec84d9e28100bcc651a40ec79c48c57eb35d94c57c5111bf0b66be396d718531",
+  },
+  {
+    id: "USR-S01-5763", name: "BELOMBO PAOLA BERLINE", alias: "belombo",
+    role: "Responsable Finance & Comptabilité", dept: "Finance & Comptabilité",
+    process: "S01", processes: ["S01","P03","S05"], level: 4, avatar: "BP", color: "#06B6D4",
+    accountStatus: "ACTIF", isActive: true, sexe: "F", nationalite: "Gabonaise",
+    telephone: "+241 04258474", email: "berline-fin@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable Finance & Comptabilité au cabinet Génie Consultant.",
+    passwordHash: "5dd57c92bd25860ea767e3cf919aeace4cfec18037ae5ce33ebbcbbb594eb17e", // 1-5763
+  },
+  {
+    id: "USR-S02-0571", name: "KASTANH PEMAGNY FEDRICH LORPHANE", alias: "fkastanh",
+    role: "Responsable Audit & Contrôle - Conformité", dept: "Audit & Contrôle",
+    process: "S02", processes: ["S02","P02","O03"], level: 4, avatar: "KP", color: "#F59E0B",
+    accountStatus: "ACTIF", isActive: true, sexe: "M", nationalite: "Gabonaise",
+    telephone: "+241 074029299", email: "fkastanh-rac@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable Audit & Contrôle - Conformité au cabinet Génie Consultant.",
+    passwordHash: "4080c9403bd7810523e6792bbe8c29683e58e1e85a4873d1d01386896ac55a04", // fkastanh@30
+  },
+  {
+    id: "USR-O02-8587", name: "NZE NGUEMA JEREMY", alias: "nze",
+    role: "Responsable des Relations Publiques", dept: "Département Juridique",
+    process: "P04", processes: ["P04","O02","S05"], level: 4, avatar: "NN", color: "#06B6D4",
+    accountStatus: "ACTIF", isActive: true, sexe: "M", nationalite: "Gabonaise",
+    email: "jeremy-jur@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable des Relations Publiques au cabinet Génie Consultant.",
+    passwordHash: "f428357e60d1e22d2929594c9df504d85bd891d926c07f52c84593a4967454ad", // 2-8587
+  },
+  {
+    id: "USR-S03-3840", name: "NSEGHE ELEMVA ADELIA DAN FARNELLE", alias: "nseghe",
+    role: "Responsable Ressources Humaines", dept: "Ressources Humaines",
+    process: "S03", processes: ["S03"], level: 4, avatar: "NE", color: "#06B6D4",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    telephone: "+241 04462960", email: "dan-rh@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable Ressources Humaines au cabinet Génie Consultant.",
+    passwordHash: "78b0c4e9e13fde649c04da9be72a639b38f36ab31593d96ce07ee7fc09b07ba5", // 3-3840
+  },
+  {
+    id: "USR-P02-2567", name: "OBIANG MODOSS LOUIS PAUL EVARISTE", alias: "obiang",
+    role: "Responsable Conformité - Veille Commerciale", dept: "Non défini",
+    process: "P02", processes: ["P02","P04","S04"], level: 4, avatar: "OM", color: "#3B82F6",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    email: "modoss-conf@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable Conformité - Veille Commerciale au cabinet Génie Consultant.",
+    passwordHash: "073823e5dc2e8e77b75696c0fcfc0592b734980d03235512ba19fb7701bbf7b3", // 2-2567
+  },
+  {
+    id: "USR-O02-4973", name: "ITONDJA HANGOUE4 BRIDON Jr", alias: "itondja",
+    role: "Juriste & Assistant Resp Rel avec l'Ext", dept: "Département Juridique",
+    process: "O02", processes: ["O02"], level: 3, avatar: "IH", color: "#3B82F6",
+    accountStatus: "ACTIF", isActive: true, sexe: "M", nationalite: "Gabonaise",
+    email: "bridon-jur@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Assistant Responsable Juridique au cabinet Génie Consultant.",
+    passwordHash: "b8328ab2316b7daa088e43de4088a50f9cfc5d54f0cfe1eab7b974be192d625f", // 2-4973
+  },
+  {
+    id: "USR-O01-7458", name: "MOULOUNGUI MARTINA", alias: "mouloungui",
+    role: "Responsable Administrative & Assistante DG", dept: "Finance & Comptabilité",
+    process: "O01", processes: ["O01","S03"], level: 3, avatar: "MM", color: "#0EA5E9",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    email: "gabrielle-fin@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable Administrative & Assistante DG au cabinet Génie Consultant.",
+    passwordHash: "3363a9894b3933325e0b70881af0f1131cf0ad8a29af5d1d0c2954efc5178a3e", // 1-7458
+  },
+  {
+    id: "USR-O02-6873", name: "MAYOMBO MATOUMBA MICHELLE SANDY", alias: "mayombo",
+    role: "Responsable Juridique", dept: "Département Juridique",
+    process: "O02", processes: ["O02"], level: 4, avatar: "MM", color: "#EC4899",
+    accountStatus: "ACTIF", isActive: true, sexe: "F", nationalite: "Gabonaise",
+    email: "michelle-jur@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Responsable du service Juridique au cabinet Génie Consultant.",
+    passwordHash: "bf307a3593026bdf386cddc0731fe58504fc4a9b6d7790d46f5c80a47ae0e3a1", // 2-6873
+  },
+  {
+    id: "USR-O02-5833", name: "BABAZE AKOUBINA CHAPUIE CYBELLE", alias: "babaze",
+    role: "Juriste", dept: "Département Juridique",
+    process: "O02", processes: ["O02"], level: 2, avatar: "BA", color: "#EC4899",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    telephone: "+241 04405533", email: "cybelle-jur@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Juriste au cabinet Génie Consultant.",
+    passwordHash: "85e0c97424789c444e5820f10f9525db47320ed8241dcc498a76273eb6a1ec8d", // 2-5833
+  },
+  {
+    id: "USR-O02-8631", name: "SAHOU-MANGUI MURIELLE", alias: "sahou-mangui",
+    role: "Juriste", dept: "Département Juridique",
+    process: "O02", processes: ["O02"], level: 2, avatar: "SM", color: "#F59E0B",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    telephone: "+241 06476716", email: "murielle-jur@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Juriste au cabinet Génie Consultant.",
+    passwordHash: "ac779006aacf6d71028b4373be8c2b4b1b8a22438838971070066419e73d015c", // 2-8631
+  },
+  {
+    id: "USR-S05-6391", name: "KALOGA MADI", alias: "kaloga",
+    role: "Chargé de Logistique & Rel avec Extérieur", dept: "Relations Ext. & Logistique",
+    process: "S05", processes: ["S05"], level: 3, avatar: "KM", color: "#22C55E",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    email: "madi-log@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Chargé de Logistique & Rel avec Extérieur au cabinet Génie Consultant.",
+    passwordHash: "7fe7124077233ef706413136eac2f467ac977cf8a1bef0273ceb2e49305962bd", // 5-6391
+  },
+  {
+    id: "USR-S01-2483", name: "ANGUILET DAOUDA RISSI WILLIAME MYRIAME LOUISE GABRIELLE", alias: "anguilet",
+    role: "Assistante Administrative & Comptable", dept: "Finance & Comptabilité",
+    process: "S01", processes: ["S01"], level: 3, avatar: "AD", color: "#22C55E",
+    accountStatus: "ACTIF", isActive: true, nationalite: "Gabonaise",
+    email: "gabi-fin@genie-consultant.com", adresse: "Libreville, Gabon",
+    bio: "Assistante Administrative & Comptable au cabinet Génie Consultant.",
+    passwordHash: "33462aa0feb6fbc7d8e13898be249152b0a6b79f9e6facbb8cdbfd1cebd27ce0", // 1-2483
   },
 ];
 
@@ -637,6 +752,35 @@ async function initDatabase() {
 }
 
 function createTables() {
+  // [FIX-v2-SCHEMA] Migration automatique si la DB a l'ancien schema (colonne "json" au lieu de "value")
+  // Cela peut arriver apres un rebuild-db-fresh.mjs (ancienne version incompatible)
+  try {
+    const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='si_data'").get();
+    if (tableExists) {
+      const cols = db.prepare('PRAGMA table_info(si_data)').all().map(c => c.name);
+      if (!cols.includes('value') && cols.includes('json')) {
+        console.log('[DB-MIGRATE] Schema incompatible detecte (colonne "json") — migration en cours...');
+        const rows = db.prepare('SELECT key, json FROM si_data').all();
+        db.exec(`CREATE TABLE IF NOT EXISTS si_data_v2 (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '{}',
+          updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          updated_by TEXT DEFAULT NULL, size_bytes INTEGER DEFAULT 0);`);
+        const ins = db.prepare("INSERT OR REPLACE INTO si_data_v2 (key, value, size_bytes) VALUES (?, ?, ?)");
+        const tx  = db.transaction(() => {
+          for (const r of rows) ins.run(r.key, r.json || '{}', Buffer.byteLength(r.json || '{}', 'utf8'));
+        });
+        tx();
+        db.exec('DROP TABLE si_data; ALTER TABLE si_data_v2 RENAME TO si_data;');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_si_data_updated ON si_data(updated_at DESC);');
+        console.log(`[DB-MIGRATE] Migration OK — ${rows.length} entree(s) migrees`);
+      } else if (cols.includes('value') && !cols.includes('size_bytes')) {
+        try { db.exec('ALTER TABLE si_data ADD COLUMN size_bytes INTEGER DEFAULT 0;'); } catch(_){}
+      }
+    }
+  } catch(migErr) {
+    console.warn('[DB-MIGRATE] Avertissement :', migErr.message);
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS si_data (
       key        TEXT    PRIMARY KEY,
@@ -720,6 +864,30 @@ function ensureSiFilesColumns() {
 }
 
 async function createTablesAsync() {
+  // [FIX-v2-SCHEMA] Migration auto si colonne "json" détectée (schéma incompatible)
+  try {
+    const tblExists = await getAsync("SELECT name FROM sqlite_master WHERE type='table' AND name='si_data'");
+    if (tblExists) {
+      const cols = (await allAsync('PRAGMA table_info(si_data)')).map(c => c.name);
+      if (!cols.includes('value') && cols.includes('json')) {
+        console.log('[DB-MIGRATE] Schema incompatible (colonne "json") — migration async...');
+        const rows = await allAsync('SELECT key, json FROM si_data');
+        await runAsync(`CREATE TABLE IF NOT EXISTS si_data_v2 (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '{}',
+          updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          updated_by TEXT DEFAULT NULL, size_bytes INTEGER DEFAULT 0)`);
+        for (const r of rows) {
+          const v = r.json || '{}';
+          await runAsync('INSERT OR REPLACE INTO si_data_v2 (key, value, size_bytes) VALUES (?, ?, ?)',
+            [r.key, v, Buffer.byteLength(v, 'utf8')]);
+        }
+        await runAsync('DROP TABLE si_data');
+        await runAsync('ALTER TABLE si_data_v2 RENAME TO si_data');
+        console.log(`[DB-MIGRATE] Migration async OK — ${rows.length} entree(s)`);
+      }
+    }
+  } catch(migErr) { console.warn('[DB-MIGRATE] Avert async :', migErr.message); }
+
   const stmts = [
     `CREATE TABLE IF NOT EXISTS si_data(key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '{}', updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')), updated_by TEXT, size_bytes INTEGER DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS si_files(id TEXT PRIMARY KEY, filename TEXT NOT NULL, original_name TEXT NOT NULL, mime_type TEXT DEFAULT 'application/octet-stream', size_bytes INTEGER DEFAULT 0, dossier_id TEXT, module TEXT DEFAULT 'general', uploaded_by TEXT, uploaded_at INTEGER DEFAULT (strftime('%s','now')), disk_path TEXT NOT NULL, compressed INTEGER DEFAULT 0, compressed_path TEXT, checksum TEXT, deleted INTEGER DEFAULT 0)`,
@@ -1148,6 +1316,11 @@ io.on('connection', (socket) => {
           socket.emit('identified', { ok: true, socketId: socket.id, clients: connectedClients.size, verified: true });
           console.log(`👤 Identifié (JWT): ${user.username} (${socket.id})`);
           auditLog(user.id, 'WS_CONNECT', 'socket', 'Connexion WebSocket vérifiée', ip);
+          // FIX SYNC-INIT — Envoyer sync_init ciblé juste après identification
+          // Force ce client (et ce client seul) à invalider son cache et re-fetcher depuis le serveur
+          setTimeout(() => {
+            socket.emit('sync_init', { ts: Date.now(), reason: 'identify_complete' });
+          }, 800);
         });
         return;
       }
@@ -1161,6 +1334,14 @@ io.on('connection', (socket) => {
     }
   });
 
+  // FIX SYNC-INIT — Réponse à la demande de resync ciblée d'un client (après Ctrl+R / reconnexion)
+  socket.on('client_sync_request', () => {
+    const info = connectedClients.get(socket.id);
+    if (info?.verified) {
+      socket.emit('sync_init', { ts: Date.now(), reason: 'client_request' });
+    }
+  });
+
   // [C3][FIX v153-K] Flush offline queue — userId pris du registre JWT vérifié (pas du client)
   socket.on('flush_offline_queue', async (items) => {
     if (!Array.isArray(items) || !items.length) return;
@@ -1169,7 +1350,39 @@ io.on('connection', (socket) => {
     const clientInfo = connectedClients.get(socket.id) || {};
     const verifiedUserId = clientInfo.verified ? clientInfo.userId : 'offline-anonymous';
 
-    const batch = items.slice(0, 200);
+    // FIX BUG#3 — Filter items against tombstone registry BEFORE processing
+    // Without this, deleted items can resurrect from offline queue
+    let tombstones = {};
+    try {
+      if (dbReady) {
+        tombstones = (await dbGet('gc-tombstones')) || {};
+      }
+    } catch (e) {
+      console.warn('[flush_offline_queue] Erreur lecture tombstones:', e.message);
+    }
+    
+    const batch = items.slice(0, 200).filter(item => {
+      if (!item?.key || !isAllowedKey(item.key)) return false;
+      if (item.value === undefined || item.value === null) return false;
+      
+      // Check if key was wiped after item was created (global wipe)
+      const wipeTs = _wipeRegistry[item.key];
+      if (wipeTs && item.ts < wipeTs) {
+        console.warn(`[flush_offline_queue] Item for key '${item.key}' predates wipe (${item.ts} < ${wipeTs}), skipping`);
+        return false;
+      }
+      
+      // Check if individual items are tombstoned
+      if (Array.isArray(item.value) && tombstones[item.key]) {
+        const tombstonedIds = new Set(tombstones[item.key]);
+        const originalLen = item.value.length;
+        item.value = item.value.filter(i => !i?.id || !tombstonedIds.has(String(i.id)));
+        if (item.value.length < originalLen) {
+          console.warn(`[flush_offline_queue] Filtered ${originalLen - item.value.length} tombstoned items from '${item.key}'`);
+        }
+      }
+      return true;
+    });
     let synced = 0;
 
     const doFlush = async () => {
@@ -1244,6 +1457,93 @@ io.on('connection', (socket) => {
     console.log(`🔌 Déconnecté: ${socket.id} — total: ${connectedClients.size}`);
   });
 });
+
+// ── WIPE REGISTRY — trace les resets volontaires pour bloquer la résurrection ──────────────────
+// Clé serveur : 'gc-wipe-registry' = { [dataKey]: wipeTimestamp }
+// Chargé en mémoire au démarrage, persisté en SQLite/JSON.
+// FIX PHASE-2-C: Ensure wipe registry is ALWAYS persisted and survives restarts
+let _wipeRegistry = {};
+let _wipeRegistryReady = false;
+
+// Load wipe registry at startup (critical - must not skip on error)
+(async () => {
+  try {
+    const saved = await dbGet('gc-wipe-registry');
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      _wipeRegistry = saved;
+      console.log(`[WIPE-REGISTRY] Loaded ${Object.keys(_wipeRegistry).length} wipes at startup`);
+    }
+  } catch (e) {
+    console.error('[WIPE-REGISTRY] Startup load failed:', e.message);
+    // Continue anyway - wipe registry might be unavailable but shouldn't crash server
+  } finally {
+    _wipeRegistryReady = true;
+  }
+})();
+
+async function recordWipe(key, ts = Date.now()) {
+  if (!key) return;
+  
+  _wipeRegistry[key] = ts;
+  
+  // FIX: Retry persistance jusqu'à succès avec backoff exponentiel
+  let retries = 3;
+  let lastError = null;
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      await dbSet('gc-wipe-registry', _wipeRegistry);
+      console.log(`[WIPE-REGISTRY] Recorded wipe for '${key}' at ${new Date(ts).toISOString()}`);
+      
+      // Broadcast à tous les clients connectés
+      broadcast('data_changed', { key: 'gc-wipe-registry', action: 'set', ts: Date.now() }, null);
+      return;
+    } catch (e) {
+      lastError = e;
+      if (i < retries - 1) {
+        // Exponential backoff: 100ms, 200ms, 400ms
+        await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, i)));
+      }
+    }
+  }
+  
+  // If all retries failed, log critical error but don't crash
+  console.error(`[WIPE-REGISTRY] CRITICAL: Failed to persist wipe for '${key}' after ${retries} retries:`, lastError?.message);
+  try {
+    auditLog('system', 'WIPE_PERSIST_FAILED', key, `Failed to persist wipe: ${lastError?.message}`, 'server');
+  } catch (_) {}
+}
+
+function getWipeTs(key) { return _wipeRegistry[key] || 0; }
+
+// FIX: Expose wipe registry stats for monitoring
+function getWipeRegistryStats() {
+  return {
+    ready: _wipeRegistryReady,
+    keysWithWipes: Object.keys(_wipeRegistry).length,
+    oldestWipe: Object.values(_wipeRegistry).length > 0 ? Math.min(...Object.values(_wipeRegistry)) : null,
+    newestWipe: Object.values(_wipeRegistry).length > 0 ? Math.max(...Object.values(_wipeRegistry)) : null,
+  };
+}
+
+// FIX SYNC-HB — Heartbeat serveur toutes les 30s : broadcast 'heartbeat_sync' à tous les clients.
+// On inclut maintenant la liste des clés à re-fetcher (wipe-registry inclus) pour une couverture totale.
+setInterval(() => {
+  if (io.sockets.sockets.size === 0) return;
+  const ts = Date.now();
+  io.emit('heartbeat_sync', { ts, wipeRegistry: _wipeRegistry });
+  // Log discret (toutes les 10 heartbeats = 5 min) pour éviter de noyer les logs
+  if (Math.floor(ts / 30_000) % 10 === 0) {
+    console.log(`[HB] Heartbeat sync → ${io.sockets.sockets.size} client(s) connecté(s)`);
+  }
+}, 30_000);
+
+// FIX BUG#5 — Broadcast wipe registry IMMÉDIATEMENT (pas seulement via heartbeat)
+// Lorsqu'une clé est wipée, tous les clients doivent le savoir tout de suite
+// Sinon, clients offline reconnectant dans <30s peuvent ressusciter des données wipées
+function broadcastWipeRegistryUpdate(key) {
+  io.emit('wipe_registry_update', { key, ts: _wipeRegistry[key], full: _wipeRegistry });
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  ROUTES
@@ -1664,19 +1964,55 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     'gc-standalone-docs', 'gc-messages', 'gc-notifications',
   ]);
 
+  // AUTH GUARD — x-force-overwrite requiert niveau 4+ ou admin
+  const reqLevel = req.user?.level || 0;
+  const reqIsAdmin = req.user?.isAdmin || reqLevel >= 6;
+  if (req.headers['x-force-overwrite'] && !reqIsAdmin && reqLevel < 4) {
+    return res.status(403).json({ error: 'Niveau 4 minimum requis pour forceOverwrite' });
+  }
+
+  // WIPE REGISTRY — Si forceOverwrite + tableau vide (ou très réduit) : enregistrer le wipe
+  const isWipe = req.headers['x-force-overwrite'] && Array.isArray(sanitized) && sanitized.length === 0;
+  if (isWipe) {
+    await recordWipe(key);
+  }
+
+  // ANTI-RÉSURRECTION : si un wipe volontaire a été enregistré pour cette clé,
+  // et que le client envoie des données SANS forceOverwrite (client hors-ligne qui revient),
+  // on écrase sa valeur par [] pour respecter le reset intentionnel.
+  const wipeTs = getWipeTs(key);
   let finalValue = sanitized;
   if (
-    isArrayOfObjectsWithIds(sanitized) &&
+    wipeTs > 0 &&
+    !req.headers['x-force-overwrite'] &&
+    Array.isArray(sanitized) && sanitized.length > 0
+  ) {
+    // FIX BUG#10 — Défaut clientTs à Date.now() (pas 0) pour éviter false positives
+    // Si un client offline n'envoie pas x-client-ts, on assume qu'il est récent (current time)
+    // Sinon, tout client offline reconnectant sera traité comme antérieur à wipe
+    const clientTs = Number(req.headers['x-client-ts'] || req.headers['x-write-ts'] || Date.now());
+    if (clientTs < wipeTs) {
+      // Données du client antérieures au wipe → respecter le reset, ignorer les données entrantes
+      finalValue = [];
+    }
+  }
+
+  if (
+    isArrayOfObjectsWithIds(finalValue) &&
     !req.headers['x-force-overwrite']
   ) {
     try {
       const existing = await dbGet(key);
       // Pour MERGE_ALWAYS_KEYS : union-merge dès qu'il y a des données existantes (pas de seuil %)
       // Pour les autres : seuil < 70% (défensif)
+      // Si finalValue est [] suite à l'anti-résurrection → pas de merge, on respecte le wipe
+      if (finalValue.length === 0) {
+        // pas de merge nécessaire, finalValue reste []
+      } else {
       const shouldMerge = Array.isArray(existing) && existing.length >= 2 && (
         MERGE_ALWAYS_KEYS.has(key)
           ? true  // union-merge systématique pour clés métier
-          : sanitized.length < existing.length * 0.7
+          : finalValue.length < existing.length * 0.7
       );
       if (shouldMerge) {
         const incomingIds = new Set(sanitized.map(item => item?.id).filter(Boolean));
@@ -1687,10 +2023,22 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
             (tombstones[key] || []).forEach(id => tombstonedIds.add(String(id)));
           }
         } catch (_) {}
+        
+        // FIX PHASE-1-C: Filter out any resurrected items (present in tombstones)
+        // Especially important when client was offline and sends stale data with deleted items
+        const filteredIncoming = sanitized.filter(item => {
+          if (!item?.id) return true;
+          const isInTombstone = tombstonedIds.has(String(item.id));
+          if (isInTombstone) {
+            console.log(`[ANTI-RESURRECTION-BE] Filtered resurrected item ${key}/${item.id}`);
+          }
+          return !isInTombstone;
+        });
+        
         // Items du serveur absents de l'entrant (et non-tombstonés) → à préserver
         const preserved = existing.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
-        // Filtrer aussi l'entrant lui-même (exclure tombstonés dans l'entrant)
-        const filteredSanitized = sanitized.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
+        // Filtrer aussi l'entrant lui-même (exclure tombstonés dans l'entrant) - USE filteredIncoming
+        const filteredSanitized = filteredIncoming.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
         // Pour les conflits (même ID dans entrant ET serveur) : garder la version la plus récente
         const existingById = new Map(existing.map(i => [String(i?.id), i]));
         const resolvedIncoming = filteredSanitized.map(item => {
@@ -1723,7 +2071,8 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
             req.ip
           );
         }
-      }
+      } // end if shouldMerge
+      } // end else (finalValue.length > 0)
     } catch (mergeErr) {
       console.warn('[ANTI-REGRESSION] Erreur lecture pour merge:', mergeErr.message);
       // En cas d'erreur de lecture → continuer avec la valeur envoyée (fail-open)
@@ -1736,6 +2085,17 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
   const valJson = JSON.stringify(writeValue);
   if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) {
     return res.status(413).json({ error: `Valeur trop grande (max ${MAX_VALUE_MB} MB)` });
+  }
+
+  // [DEDUP] Si la valeur entrante est identique à la valeur stockée → pas d'écriture, pas de broadcast.
+  // Coupe les boucles write→broadcast→GET→write qui créent des centaines de req/s (ex: gc-app-habilitations).
+  if (!req.headers['x-force-overwrite'] && dbReady) {
+    try {
+      const currentRaw = await dbGet(key);
+      if (JSON.stringify(currentRaw) === valJson) {
+        return res.status(200).json({ ok: true, noop: true });
+      }
+    } catch (_) {}
   }
 
   if (dbReady) {
@@ -1853,6 +2213,9 @@ app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, re
   } else { const d = jsonLoad(); delete d[key]; jsonSave(d); }
   const senderSocketId = req.headers['x-socket-id'] || null;
   broadcast('data_changed', { key, action: 'delete', by: userId, ts: Date.now() }, senderSocketId);
+  // FIX BUG#5 — Broadcast immédiat du wipe (pas juste via heartbeat 30s)
+  _wipeRegistry[key] = Date.now();
+  broadcastWipeRegistryUpdate(key);
   res.json({ ok: true, key, deleted: true });
 });
 
@@ -2202,6 +2565,35 @@ app.get('/api/files', rateLimiter(200), authenticateTokenOptional, async (req, r
   res.json({ ok: true, files: rows });
 });
 
+// [ADMIN] POST /api/files/rebuild-kv — Reconstruit gc-dossier-files depuis si_files
+// Utile pour réparer les machines où gc-dossier-files est désynchronisé (fichiers uploadés avant FIX FILE-SYNC-1)
+app.post('/api/files/rebuild-kv', rateLimiter(5), authenticateToken, async (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'DB indisponible' });
+  if ((req.user?.level || 0) < 5 && !req.user?.isAdmin) return res.status(403).json({ error: 'Niveau 5+ requis' });
+  try {
+    const sql = 'SELECT id,original_name,mime_type,size_bytes,dossier_id,module,uploaded_by,uploaded_at FROM si_files WHERE deleted=0 ORDER BY uploaded_at DESC';
+    const rows = dbMode === 'sqlite3' ? await allAsync(sql, []) : db.prepare(sql).all();
+    const fileRefs = rows.map(r => ({
+      id: r.id,
+      nom: r.original_name,
+      type: r.mime_type,
+      taille: r.size_bytes,
+      module: r.module || 'general',
+      dossierId: r.dossier_id || null,
+      uploadedBy: r.uploaded_by,
+      uploadedAt: r.uploaded_at,
+      synced: true,
+      serverId: r.id,
+      serverUrl: `/api/files/${r.id}`,
+    }));
+    await dbSet('gc-dossier-files', fileRefs, req.user?.id || 'admin');
+    broadcast('data_changed', { key: 'gc-dossier-files', action: 'set', by: req.user?.id, ts: Date.now() }, null);
+    res.json({ ok: true, count: fileRefs.length, message: `${fileRefs.length} fichiers indexés dans gc-dossier-files` });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.delete('/api/files/:id', rateLimiter(100), authenticateToken, async (req, res) => {
   const id = req.params.id;
   if (!dbReady) return res.status(404).json({ error: 'DB indisponible' });
@@ -2407,8 +2799,8 @@ app.post('/api/sync/resync-all', rateLimiter(5, 60_000), authenticateToken, asyn
 // COLLECT-ALL — Demande à tous les clients de pousser leurs données locales vers le serveur
 // Le serveur agrège via union-merge (tombstones respectés) puis rediffuse un resync_all
 app.post('/api/sync/collect-all', rateLimiter(3, 120_000), authenticateToken, async (req, res) => {
-  if (!req.user?.isAdmin && (req.user?.level || 0) < 6) {
-    return res.status(403).json({ error: 'Admin système requis' });
+  if (!req.user?.isAdmin && (req.user?.level || 0) < 5) {
+    return res.status(403).json({ error: 'Niveau 5+ requis' });
   }
   const userId = req.user?.id || 'admin';
   const collectId = `collect-${Date.now()}`;
@@ -2701,17 +3093,52 @@ app.post('/api/backup/restore/:filename', rateLimiter(2, 60_000), authenticateTo
 
     const backup = JSON.parse(fs.readFileSync(filepath, 'utf8'));
     const data = backup.data || backup;
-    let restored = 0, skipped = 0;
+    const backupTs = backup.ts || 0;  // Timestamp quand le backup a été créé
+    
+    // FIX PHASE-2: Load wipe registry and check for conflicts
+    let conflictedKeys = [];
+    try {
+      for (const [key, value] of Object.entries(data)) {
+        if (!isAllowedKey(key) || key === 'gc-wipe-registry') continue;
+        const wipeTs = _wipeRegistry[key] || 0;
+        // Si un wipe a été enregistré APRÈS ce backup, il y a conflit
+        if (wipeTs > 0 && wipeTs > backupTs) {
+          conflictedKeys.push({ key, wipedAt: new Date(wipeTs).toISOString(), backupDate: new Date(backupTs).toISOString() });
+        }
+      }
+    } catch (e) {}
+    
+    // FIX PHASE-2: Si conflits, demander confirmation avec détails
+    if (conflictedKeys.length > 0 && !req.headers['x-confirm-overwrite-wipes']) {
+      return res.status(409).json({
+        ok: false,
+        conflict: 'RESTORE_AFTER_WIPE',
+        message: `Ce backup contient ${conflictedKeys.length} clé(s) qui ont été wiped après sa création. Inclure le header X-Confirm-Overwrite-Wipes: 1 pour forcer.`,
+        conflictedKeys,
+        emergency: emergencyFilename,
+      });
+    }
+    
+    let restored = 0, skipped = 0, blocked = 0;
     for (const [key, value] of Object.entries(data)) {
       // [FIX v153-I] Seules les clés autorisées sont restaurées — évite injection de clés arbitraires
       if (!isAllowedKey(key)) { skipped++; continue; }
+      
+      // FIX PHASE-2-B: Don't restore if wipe is newer than backup
+      const wipeTs = _wipeRegistry[key] || 0;
+      if (wipeTs > 0 && wipeTs > backupTs) {
+        console.log(`[BACKUP-RESTORE] Skipping ${key} (wiped at ${new Date(wipeTs).toISOString()} > backup at ${new Date(backupTs).toISOString()})`);
+        blocked++;
+        continue;
+      }
+      
       if (dbReady) await dbSet(key, value, req.user?.id);
       else { const d = jsonLoad(); d[key] = value; jsonSave(d); }
       restored++;
     }
-    await auditLog(req.user?.id, 'BACKUP_RESTORE', 'backup', `Restauré ${restored} clés depuis ${filename} (ignorées: ${skipped})`, req.ip);
-    broadcast('full_restore', { filename, restored, skipped, emergency: emergencyFilename, ts: Date.now() });
-    res.json({ ok: true, restored, skipped, filename, emergency: emergencyFilename });
+    await auditLog(req.user?.id, 'BACKUP_RESTORE', 'backup', `Restauré ${restored} clés depuis ${filename} (ignorées: ${skipped}, bloquées (wiped): ${blocked})`, req.ip);
+    broadcast('full_restore', { filename, restored, skipped, blocked, emergency: emergencyFilename, ts: Date.now() });
+    res.json({ ok: true, restored, skipped, blocked, filename, emergency: emergencyFilename });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2804,19 +3231,15 @@ async function start() {
     let allUsers = await dbGet('users') || [];
     let gcUsers  = await dbGet('gc-users') || [];
 
-    // [FIX-INIT-BOOT] If both tables are empty, initialize with default users
+    // [FIX-INIT-BOOT] If both tables are empty, initialize with default users (all 14)
     if ((!Array.isArray(allUsers) || allUsers.length === 0) && (!Array.isArray(gcUsers) || gcUsers.length === 0)) {
-      // Générer les hashes SHA-256 des mots de passe par défaut (6 derniers chars de l'ID)
-      const _sha256 = (s) => crypto.createHash('sha256').update(s + GC_SHA256_SALT).digest('hex');
-      allUsers = DEFAULT_INITIAL_USERS.map(u => ({
-        ...u,
-        passwordHash: _sha256(u.id.slice(-6)),
-      }));
+      // DEFAULT_INITIAL_USERS contient déjà les hashes SHA-256 précalculés — pas de re-dérivation
+      allUsers = DEFAULT_INITIAL_USERS.map(u => ({ ...u }));
       gcUsers = allUsers.map(u => ({
         id: u.id,
         username: u.alias || u.id,
         email: u.email || '',
-        passwordHash: u.passwordHash,
+        passwordHash: u.passwordHash || '',
         role: u.role || 'Collaborateur',
         level: u.level ?? 1,
         accountStatus: u.accountStatus || 'ACTIF',
@@ -2825,7 +3248,31 @@ async function start() {
       }));
       await dbSet('users', allUsers);
       await dbSet('gc-users', gcUsers);
-      console.log(`[BOOT-INIT] ✅ Tables utilisateurs initialisées avec ${allUsers.length} comptes par défaut (hashes SHA-256 générés)`);
+      console.log(`[BOOT-INIT] ✅ Tables utilisateurs initialisées avec ${allUsers.length} comptes par défaut`);
+    }
+
+    // [FIX-v2-MISSING-HASHES] Si 'users' a des comptes sans passwordHash, les corriger
+    // en utilisant les hashes connus de DEFAULT_INITIAL_USERS (lookup par ID)
+    const defaultHashMap = new Map(DEFAULT_INITIAL_USERS.map(u => [u.id, u.passwordHash]));
+    let hashesFixed = 0;
+    if (Array.isArray(allUsers)) {
+      for (const u of allUsers) {
+        if (u.id && !u.passwordHash) {
+          const defaultHash = defaultHashMap.get(u.id);
+          if (defaultHash) {
+            u.passwordHash = defaultHash;
+            hashesFixed++;
+          } else {
+            // Fallback générique : SHA-256 des 6 derniers chars de l'ID
+            u.passwordHash = crypto.createHash('sha256').update(u.id.slice(-6) + GC_SHA256_SALT).digest('hex');
+            hashesFixed++;
+          }
+        }
+      }
+      if (hashesFixed > 0) {
+        await dbSet('users', allUsers);
+        console.log(`[BOOT-HASHFIX] ✅ ${hashesFixed} hash(es) manquant(s) régénéré(s) dans 'users'`);
+      }
     }
 
     // [FIX-BOOT-RECOVER] Si 'users' est perdu mais 'gc-users' existe, reconstruire
@@ -2855,8 +3302,7 @@ async function start() {
     for (const u of allUsers) {
       if (!u.id) continue;
       const idx = synced.findIndex(g => g.id === u.id);
-      // Ne jamais écraser un hash bcrypt (gc-users) avec un hash inférieur ou vide (users).
-      // Priorité : bcrypt > SHA-256 > vide.
+      // Priorité des hashes : bcrypt (gc-users) > SHA-256 (users) > SHA-256 par défaut > vide
       let hashToUse = u.passwordHash || '';
       if (idx !== -1) {
         const existingHash = synced[idx].passwordHash || '';
@@ -2864,6 +3310,11 @@ async function start() {
         const incomingIsBcrypt = hashToUse.startsWith('$2b$') || hashToUse.startsWith('$2a$');
         if (existingIsBcrypt && !incomingIsBcrypt) hashToUse = existingHash; // préserver bcrypt
         if (existingHash && !hashToUse) hashToUse = existingHash; // préserver tout hash vs vide
+      }
+      // [FIX-v2] Si toujours vide après lookup, utiliser le hash par défaut connu
+      if (!hashToUse && u.id) {
+        hashToUse = defaultHashMap.get(u.id)
+          || crypto.createHash('sha256').update(u.id.slice(-6) + GC_SHA256_SALT).digest('hex');
       }
       const entry = {
         id: u.id, username: u.alias || u.id, email: u.email || '',

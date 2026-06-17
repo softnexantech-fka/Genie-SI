@@ -133,6 +133,18 @@ export function useRemoteSync(syncMap) {
   mapRef.current = syncMap; // toujours à jour sans re-créer l'effet
 
   useEffect(() => {
+    // Fetch initial — charger toutes les clés depuis le serveur au montage
+    const entries = () => Object.entries(mapRef.current);
+    const fetchAll = async () => {
+      await Promise.allSettled(entries().map(async ([key, setter]) => {
+        try {
+          const val = await dsGet(key, null);
+          if (val !== null && val !== undefined) setter(val);
+        } catch {}
+      }));
+    };
+    fetchAll();
+
     // Écoute data_changed via StorageEvent __GC__key
     const handler = async (e) => {
       if (!e.key?.startsWith('__GC__')) return;
@@ -146,20 +158,17 @@ export function useRemoteSync(syncMap) {
     };
     window.addEventListener('storage', handler);
 
-    // Écoute resync_all global (admin) → re-fetcher TOUTES les clés suivies
-    const handleResyncAll = async () => {
-      const entries = Object.entries(mapRef.current);
-      await Promise.allSettled(entries.map(async ([key, setter]) => {
-        try {
-          const val = await dsGet(key, null);
-          if (val !== null && val !== undefined) setter(val);
-        } catch {}
-      }));
-    };
+    // Écoute resync_all global (admin ou serveur heartbeat) → re-fetcher TOUTES les clés suivies
+    const handleResyncAll = () => fetchAll();
     window.addEventListener('gc-resync-all', handleResyncAll);
     window.addEventListener('gc-sync-online', handleResyncAll);
 
+    // FIX SYNC-AUTO — Polling autonome toutes les 30s : garantit la fraîcheur même
+    // si un broadcast WebSocket a été manqué (reconnexion, client passif, etc.)
+    const pollInterval = setInterval(fetchAll, 30_000);
+
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('storage', handler);
       window.removeEventListener('gc-resync-all', handleResyncAll);
       window.removeEventListener('gc-sync-online', handleResyncAll);

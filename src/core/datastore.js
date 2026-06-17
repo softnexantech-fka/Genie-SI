@@ -24,6 +24,7 @@
 // ============================================================
 
 import { _lsGet, _lsSet, lsLoad, lsSave } from './storage.js';
+import { recordTombstoneChecksum, filterResurrectedItems } from './datastore-anti-resurrection.js';
 
 // [D6][FIX v153-A] PROXY_URL — déterminé une seule fois au chargement du module
 // Port lu depuis import.meta.env.VITE_MASTER_PORT si disponible (défini dans .env.discovery)
@@ -197,6 +198,18 @@ export const SHARED_KEYS = new Set([
   'gc-comm-campagnes',      // campagnes communication
   'gc-kanban-cols-v2',      // colonnes kanban gestion rapide
   'gc-kanban-cards-v2',     // cartes kanban gestion rapide
+  // FIX BUG#7 — Clés critiques ajoutées pour éviter les suppressions invisibles
+  'gc-messages-global',     // messages globaux
+  'gc-presence',            // présence temps réel
+  'gc-notification-alerts', // alertes notifications
+  'gc-session-logs',        // logs session
+  'gc-account-actions',     // actions compte
+  'gc-audit-checklist',     // checklist audit
+  'gc-audit-prog',          // progression audit
+  'gc-factures',            // factures finance
+  'gc-achats',              // achats finance
+  'gc-logmod-stocks',       // stocks logistique
+  'gc-inventaires',         // inventaires
   'gc-archives',            // archives dossiers
   'gc-memos',               // mémos widget
   'gc-si-docs',             // documents SI
@@ -265,10 +278,21 @@ export async function dsDeleteItem(listKey, id, newList) {
 export async function dsDeleteItemFromArray(listKey, itemId, userId = null) {
   if (!listKey || !itemId) return { ok: false, reason: 'listKey et itemId requis' };
 
-  // 1. Enregistrer tombstone IMMÉDIATEMENT (garantie que ni client ni serveur ne le ressuscitent)
+  // 1. Enregistrer tombstone IMMÉDIATEMENT
   dsMarkDeleted(listKey, itemId);
 
-  // 2. Supprimer côté serveur en premier (endpoint atomique + tombstone serveur)
+  // 2. FIX PHASE-1-A: Record checksum de l'item supprimé pour anti-resurrection
+  const current = dsLoad(listKey) || [];
+  const deletedItem = current.find(item => item?.id && String(item.id) === String(itemId));
+  if (deletedItem) {
+    try {
+      await recordTombstoneChecksum(listKey, itemId, deletedItem);
+    } catch (e) {
+      console.warn(`[dsDelete] Checksum recording failed for ${listKey}/${itemId}:`, e.message);
+    }
+  }
+
+  // 3. Supprimer côté serveur en premier (endpoint atomique + tombstone serveur)
   if (_online) {
     try {
       await fetch(
@@ -278,8 +302,7 @@ export async function dsDeleteItemFromArray(listKey, itemId, userId = null) {
     } catch (_) { /* continue avec suppression locale */ }
   }
 
-  // 3. Mettre à jour localement
-  const current = dsLoad(listKey) || [];
+  // 4. Mettre à jour localement
   const newList = current.filter(item => item?.id && String(item.id) !== String(itemId));
   return dsSave(listKey, newList, userId, { forceOverwrite: true });
 }
@@ -318,11 +341,41 @@ const _pendingFetches = new Map(); // key → Promise
 const _pendingGets = new Map(); // key → Promise (déduplication dsGet globale)
 const _rateLimitState = new Map(); // key → { until:number, fails:number }
 
-const REGRESSION_KEYS = new Set(['users', 'dossiers', 'taches', 'rdvs', 'partners', 'gc-users']);
+const REGRESSION_KEYS = new Set([
+  'users', 'dossiers', 'taches', 'rdvs', 'partners', 'gc-users',
+  // FIX v156 — Clés Finance/Audit/Logistique/CRM ajoutées : un poste frais (LS vide)
+  // ne doit jamais écraser les données existantes du serveur avec un tableau vide.
+  'gc-journal', 'gc-budget', 'gc-factures', 'gc-stocks', 'gc-achats',
+  'gc-logmod-stocks', 'gc-inventaires',
+  'gc-risks', 'gc-audit-checklist', 'gc-audit-prog',
+  'gc-crm-relances', 'gc-crm-interactions', 'gc-crm-opps',
+  'gc-crm-clients', 'gc-jur-kyc', 'gc-jur-docs',
+  'gc-docs-unified', 'gc-si-docs', 'gc-standalone-docs',
+  'gc-dossier-files', 'gc-sirh-presences', 'gc-sirh-leaves',
+]);
 function isArrayOfObjectsWithIds(value) {
   return Array.isArray(value) && value.length > 0 && value.every(item => item && typeof item === 'object' && (typeof item.id === 'string' || typeof item.id === 'number'));
 }
+// ── Wipe registry client — anti-résurrection pour les resets volontaires ─────
+// Reçu via heartbeat_sync et data_changed(gc-wipe-registry).
+// Persisté en localStorage pour survivre aux rechargements.
+let _wipeRegistry = (() => {
+  try { return JSON.parse(localStorage.getItem('__gc_wipe_registry__') || '{}'); } catch (_) { return {}; }
+})();
+
+function _updateWipeRegistry(reg) {
+  if (!reg || typeof reg !== 'object') return;
+  _wipeRegistry = { ..._wipeRegistry, ...reg };
+  try { localStorage.setItem('__gc_wipe_registry__', JSON.stringify(_wipeRegistry)); } catch (_) {}
+}
+
+function _getWipeTs(key) { return _wipeRegistry[key] || 0; }
+
 function shouldProtectAgainstRegression(key, value) {
+  // Si un wipe a été enregistré pour cette clé, la donnée locale ne doit JAMAIS écraser
+  // la valeur vidée — même avec forceOverwrite depuis un autre poste.
+  // (Le contrôle inverse — anti-résurrection depuis un client hors-ligne — est géré côté serveur.)
+  if (_getWipeTs(key) > 0 && Array.isArray(value) && value.length > 0) return true;
   return REGRESSION_KEYS.has(key) || (isSharedKey(key) && isArrayOfObjectsWithIds(value));
 }
 
@@ -392,8 +445,11 @@ function saveOfflineQueue(q) {
 function enqueueOffline(key, value, userId) {
   if (!isSharedKey(key)) return; // n'enregistrer que les clés autorisées
   const q   = loadOfflineQueue();
-  const idx = q.findIndex(item => item.key === key);
-  const entry = { key, value, userId, ts: Date.now() };
+  // FIX BUG#14 — Queue dedup by key+action (not just key)
+  // Prevents: delete item → offline restore item → merge wipes delete
+  const action = Array.isArray(value) && value.length === 0 ? 'wipe' : 'set';
+  const idx = q.findIndex(item => item.key === key && item.action === action);
+  const entry = { key, value, userId, action, ts: Date.now() };
   if (idx >= 0) q[idx] = entry; else q.push(entry);
   if (q.length > 500) q.splice(0, q.length - 500);
   saveOfflineQueue(q);
@@ -526,6 +582,14 @@ async function initWebSocket() {
       _socketReady = true;
       console.log('[DS] WebSocket connecté:', _socket.id);
 
+      // FIX SYNC-RELOAD — Vider les timestamps locaux à chaque reconnexion (Ctrl+R, reprise réseau)
+      // Cela force le serveur à faire autorité sur la prochaine lecture dsGet.
+      try {
+        const tsKeys = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        tsKeys.forEach(k => localStorage.removeItem(k));
+        if (tsKeys.length) console.log(`[DS] Reconnect: ${tsKeys.length} timestamps locaux vidés → serveur fait autorité`);
+      } catch {}
+
       // [D2] Identifier avec JWT token pour vérification côté serveur
       try {
         const sess  = JSON.parse(_lsGet('gc-active-session') || 'null');
@@ -534,8 +598,6 @@ async function initWebSocket() {
           _socket.emit('identify', {
             userId:   sess.userId,
             userName: sess.userName || sess.name || sess.userId,
-            // Token JWT envoyé pour vérification côté serveur
-            // Si absent (première connexion avant login), le serveur identifie anonymement
             token:    token ? token.replace(/^Bearer /, '') : undefined,
           });
         }
@@ -543,6 +605,11 @@ async function initWebSocket() {
 
       // Flusher la file d'attente offline de façon fiable (HTTP + retry)
       flushOfflineQueue().catch(() => {});
+
+      // Demander un resync complet depuis le serveur (permet sync_init ciblé)
+      setTimeout(() => {
+        try { _socket.emit('client_sync_request'); } catch {}
+      }, 1200);
     });
 
     _socket.on('disconnect', (reason) => {
@@ -573,6 +640,13 @@ async function initWebSocket() {
           t[key] = [...existing].slice(-5000);
           _lsSet(TOMBSTONE_LS_KEY, JSON.stringify(t));
         } catch {}
+      }
+
+      // Quand gc-wipe-registry change → mettre à jour le registre local des wipes
+      if (key === 'gc-wipe-registry') {
+        dsGet('gc-wipe-registry', {}).then(reg => {
+          if (reg && typeof reg === 'object') _updateWipeRegistry(reg);
+        }).catch(() => {});
       }
 
       // Quand gc-tombstones change sur le serveur (suppression depuis une autre machine),
@@ -746,6 +820,43 @@ async function initWebSocket() {
       console.log(`[DS] ✅ Sync offline: ${synced}/${total} éléments`);
     });
 
+    // FIX SYNC-HB — Heartbeat serveur toutes les 30s → invalider cache + notifier hooks
+    // Le serveur broadcast 'heartbeat_sync' à tous les clients connectés pour s'assurer
+    // que même les clients passifs (sans activité récente) aient des données à jour.
+    // Le heartbeat inclut maintenant wipeRegistry pour propager les resets volontaires.
+    _socket.on('heartbeat_sync', ({ ts, keys: hbKeys, wipeRegistry } = {}) => {
+      // Appliquer le wipe registry reçu du serveur
+      if (wipeRegistry && typeof wipeRegistry === 'object') {
+        _updateWipeRegistry(wipeRegistry);
+      }
+      const keysToInvalidate = Array.isArray(hbKeys) && hbKeys.length ? hbKeys : [...SHARED_KEYS];
+      keysToInvalidate.forEach(k => { _cache.delete(k); _pendingFetches.delete(k); });
+      _syncListeners.forEach(fn => {
+        try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: ts || Date.now() }); } catch {}
+      });
+      // Dispatcher des StorageEvents pour useRemoteSync (écoute 'storage')
+      // Couvre toutes les SHARED_KEYS pour garantir que tous les composants se rafraîchissent
+      keysToInvalidate.forEach(k => {
+        try { window.dispatchEvent(new StorageEvent('storage', { key: `__GC__${k}`, newValue: JSON.stringify({ ts: ts || Date.now(), action: 'heartbeat' }) })); } catch {}
+      });
+    });
+
+    // FIX SYNC-INIT — Le serveur répond à client_sync_request avec sync_init
+    // Déclenche un resync ciblé pour ce seul client (sans affecter les autres)
+    _socket.on('sync_init', ({ ts, reason } = {}) => {
+      console.log(`[DS] sync_init reçu (${reason || 'connect'}) — resync complet`);
+      _cache.clear();
+      _pendingFetches.clear();
+      try {
+        const tsKeys = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        tsKeys.forEach(k => localStorage.removeItem(k));
+      } catch {}
+      _syncListeners.forEach(fn => {
+        try { fn({ key: '__all__', action: 'force_resync', ts: ts || Date.now() }); } catch {}
+      });
+      try { window.dispatchEvent(new CustomEvent('gc-resync-all', { detail: { by: 'server', ts, reason } })); } catch {}
+    });
+
     _socket.on('connect_error', (err) => {
       if (err.message !== 'xhr poll error') { // Silencieux pour erreurs polling normales
         console.warn('[DS] WebSocket erreur connexion:', err.message);
@@ -872,13 +983,19 @@ export function dsStartSync(onUpdate) {
 
   startOfflineRetryLoop();
 
-  // FIX SYNC-P1 — Heartbeat resync toutes les 60s pour les clients passifs.
-  // Invalide le cache des clés critiques pour forcer un re-fetch discret en arrière-plan.
-  // Évite qu'un client reste "bloqué" sur des données périmées s'il a manqué des broadcasts.
+  // FIX SYNC-P1 v2 — Heartbeat resync toutes les 30s pour les clients passifs.
+  // Toutes les clés partagées sont invalidées toutes les 30s (3 ticks × 10s).
+  // Le serveur émet aussi 'heartbeat_sync' toutes les 30s → double couverture.
   let _heartbeatTick = 0;
+  // Toutes les clés critiques partagées (superset du précédent)
   const HEARTBEAT_KEYS = [
-    'users', 'gc-users', 'dossiers', 'taches', 'gc-dossier-files', 'gc-files',
-    'gc-notifications', 'gc-messages-global', 'gc-presence',
+    'users','gc-users','dossiers','taches','rdvs','partners',
+    'gc-dossier-files','gc-files','gc-docs-unified','gc-standalone-docs',
+    'gc-notifications','gc-messages-global','gc-session-logs',
+    'gc-app-habilitations','gc-presence','gc-factures','gc-budget',
+    'gc-risks','gc-audit-checklist','gc-crm-relances','gc-crm-interactions',
+    'gc-crm-opps','gc-jur-kyc','gc-jur-docs','gc-stocks',
+    'gc-internal-docs','gc-external-docs','gc-messages',
   ];
 
   const interval = setInterval(async () => {
@@ -888,21 +1005,19 @@ export function dsStartSync(onUpdate) {
     }
     if (nowOnline) {
       await flushOfflineQueue();
-      // FIX SYNC-P1 : Toutes les 60s (6 ticks × 10s), invalider les clés critiques
+      // Toutes les 30s (3 ticks × 10s), invalider toutes les clés heartbeat
       _heartbeatTick++;
-      if (_heartbeatTick % 6 === 0) {
+      if (_heartbeatTick % 3 === 0) {
         let invalidated = 0;
         HEARTBEAT_KEYS.forEach(k => {
           const cached = _cache.get(k);
-          // N'invalider que si la donnée a plus de 45s (évite d'écraser un fetch récent)
-          if (!cached || Date.now() - cached.ts > 45_000) {
+          // Invalider si donnée > 25s (légèrement inférieur au TTL 30s pour assurer fraîcheur)
+          if (!cached || Date.now() - cached.ts > 25_000) {
             _cache.delete(k);
             _pendingFetches.delete(k);
             invalidated++;
           }
         });
-        // FIX PERF-R1 — Ne notifier les hooks QUE si du cache a été réellement invalidé
-        // Évite des re-renders React inutiles sur tous les composants abonnés toutes les 60s.
         if (invalidated > 0) {
           _syncListeners.forEach(fn => {
             try { fn({ key: '__heartbeat__', action: 'heartbeat', ts: Date.now() }); } catch {}
@@ -1116,11 +1231,12 @@ export async function dsSave(key, value, userId = null, options = {}) {
         // ignore fetch failure, fallback to existing cache/local state
       }
     }
-    // FIX BUG-SYNC-1 — Seuil abaissé : protéger même les petites listes (>= 2 items)
-    // Ancien seuil : > 10 items ET < 80% → ne protégeait pas les petites listes.
-    // Nouveau seuil : >= 2 items ET < 70% → conservateur, réduit les faux positifs
-    // sur suppressions légitimes de plus de 20%.
-    if (Array.isArray(cachedData) && cachedData.length >= 2 && value.length < cachedData.length * 0.7) {
+    // FIX BUG-SYNC-1 & BUG#4 — Seuil abaissé à 50% (double-protection)
+    // Ancien seuil : 70% → faisait revivre 30% des deletions
+    // Cas réel : 200 budget items, supprime 30 (85%) → pas de protection
+    // Nouveau seuil : 50% → 1/3 ou plus de suppressions = toujours protégé
+    // FIX BUG#2 — Ne pas merger si forceOverwrite est set
+    if (!options.forceOverwrite && Array.isArray(cachedData) && cachedData.length >= 2 && value.length <= cachedData.length * 0.5) {
       const incomingIds = new Set(value.map(item => item?.id).filter(Boolean));
       const _tombstones = _loadTombstones();
       const tombstonedIds = new Set(_tombstones[key] || []);
@@ -1146,8 +1262,27 @@ export async function dsSave(key, value, userId = null, options = {}) {
     }
   }
 
-  // Transmettre forceOverwrite au serveur via header pour court-circuiter l'anti-régression côté serveur
-  const extraHeaders = options.forceOverwrite ? { 'x-force-overwrite': '1' } : {};
+  // Transmettre forceOverwrite au serveur + timestamp local pour anti-résurrection
+  const writeTs = _lsGet('__ts__:' + key) || String(Date.now());
+  const extraHeaders = {
+    ...(options.forceOverwrite ? { 'x-force-overwrite': '1' } : {}),
+    'x-client-ts': writeTs,
+  };
+  
+  // FIX PHASE-1-B: Filter resurrected items before sending to server
+  if (Array.isArray(sendValue) && isSharedKey(key) && !options.forceOverwrite) {
+    try {
+      const { filtered, blockedCount } = await filterResurrectedItems(key, sendValue);
+      if (blockedCount > 0) {
+        sendValue = filtered;
+        lsSave(key, sendValue);
+        _cache.set(key, { data: sendValue, ts: Date.now() });
+      }
+    } catch (e) {
+      console.warn(`[dsSave] Anti-resurrection filter failed for ${key}:`, e.message);
+    }
+  }
+  
   try {
     const r = await fetch(`${getProxyUrl()}/api/data/${encodeURIComponent(key)}`, {
       method:  'POST',
@@ -1274,11 +1409,32 @@ export async function gcSyncAuthUsers() {
   }
 }
 
+/**
+ * dsWipeKey(key) — Vide une clé définitivement : LS + timestamps + serveur avec forceOverwrite.
+ * Enregistre le wipe dans le registre local immédiatement (avant confirm serveur) pour bloquer
+ * l'anti-régression locale, puis met à jour gc-wipe-registry sur le serveur.
+ */
+export async function dsWipeKey(key, val = []) {
+  const ts = Date.now();
+  // 1. Enregistrer le wipe localement immédiatement
+  _updateWipeRegistry({ [key]: ts });
+  // 2. Vider LS + timestamps
+  try { lsSave(key, val); } catch (_) {}
+  try { localStorage.removeItem(`__ts__:${key}`); localStorage.removeItem(`__svts__:${key}`); } catch (_) {}
+  _cache.delete(key);
+  _pendingFetches.delete(key);
+  // 3. Pousser au serveur avec forceOverwrite
+  const p1 = dsSave(key, val, null, { forceOverwrite: true });
+  // 4. Mettre à jour gc-wipe-registry sur le serveur
+  const p2 = dsSave('gc-wipe-registry', _wipeRegistry, null, { forceOverwrite: true });
+  return Promise.allSettled([p1, p2]);
+}
+
 export default {
   dsProxyAvailable, dsOfflineQueueSize,
   dsInitSync, dsOnSync, dsStartSync,
   dsLoad, dsGet, dsSave, dsSet: dsSave, dsDelete,
   dsMarkDeleted, dsDeleteItem, dsDeleteItemFromArray, dsClearTombstones, dsSaveUsersWithPrune,
-  gcSyncAuthUsers,
+  gcSyncAuthUsers, dsWipeKey,
   SHARED_KEYS, getJWTToken, getRequestHeaders, getProxyUrl,
 };

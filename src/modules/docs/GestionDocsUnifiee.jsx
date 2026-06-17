@@ -214,8 +214,10 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const setPartnersSync = si?.setPartnersSync || _noop;
   const rdvs = si?.rdvs || [];
   const setRdvs = si?.setRdvs || _noop;
-  const lvl = currentUser?.level || 1;
+  const lvl = Number(currentUser?.level) || 1;
   const isAdmin = currentUser?.isAdmin || lvl >= 6;
+  // Vérifie si l'utilisateur peut accéder à un doc en fonction de son accessLevel
+  const _canAccessDoc = (d) => !d ? false : isAdmin || d.createdBy === currentUser?.id || (d.accessLevel == null) || d.accessLevel <= lvl;
   const canManageCRM = isAdmin || lvl >= 3 || currentUser?.process === "O01" || (currentUser?.processes||[]).includes("O01");
 
   // ── Données Docs & Archives ──────────────────────────────────────────────
@@ -225,6 +227,7 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const [filterProcess, setFilterProcess] = useState("all");
   const [filterNature, setFilterNature] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  const [filterDocSource, setFilterDocSource] = useState("all"); // "all"|"externe"|"interne"
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [selectedDossierIds2, setSelectedDossierIds2] = useState([]);
   const [archives, setArchives] = useState(()=>{try{return JSON.parse(_lsGet("gc-docs-archives")||"[]");}catch (_) {return [];}});
@@ -292,11 +295,14 @@ export function GestionDocsUnifiee({ T, currentUser, dossiers=[], setDossiers=_n
   const saveKycData = React.useCallback(v => { setKycDataRaw(v); try{_lsSet("gc-jur-kyc",JSON.stringify(v)); dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err));}catch(_){} dsSave("gc-jur-kyc",v).catch(err => gcToast.syncError('', err)); }, []);
 
   // Sync temps-réel : rafraîchit les données CRM quand un autre utilisateur les modifie
+  // FIX v156 — Ajout de 'partners' et 'gc-crm-clients' pour sync temps réel CRM cross-machine
   useRemoteSync({
     'gc-crm-interactions': setInteractionsRaw,
     'gc-crm-opps':         setOppsRaw,
     'gc-crm-relances':     setRelancesRaw,
     'gc-jur-kyc':          setKycDataRaw,
+    'partners':  (v) => { if (Array.isArray(v) && v.length > 0) setPartnersSync(v); },
+    'gc-crm-clients': (v) => { if (Array.isArray(v) && v.length > 0) setPartnersSync(v); },
   });
 
   // ── CRM — États UI ───────────────────────────────────────────────────────
@@ -776,16 +782,19 @@ Notes : ${client.notes||"Aucune"}`;
   // FIX vDOCS-CLOSED — Tous les dossiers actifs ET terminés/archivés sont visibles
   // pour ne jamais perdre la trace des documents liés à des dossiers clôturés.
   const activeDossiers = dossiers.filter(d=>d.status!=="ANNULE");
-  const closedDossiers = dossiers.filter(d=>["TERMINE","ARCHIVE"].includes(d.status));
-  const filteredDossiers = activeDossiers.filter(d=>(filterStatus==="all"||d.status===filterStatus)&&(filterProcess==="all"||d.process===filterProcess)&&(!search||((d.ref||"")+(d.client||"")).toLowerCase().includes(search.toLowerCase())));
+  const closedDossiers = dossiers.filter(d=>d&&["TERMINE","ARCHIVE"].includes(d.status));
+  const filteredDossiers = activeDossiers.filter(d=>d&&(filterStatus==="all"||d.status===filterStatus)&&(filterProcess==="all"||d.process===filterProcess)&&(!search||((d.ref||"")+(d.client||"")).toLowerCase().includes(search.toLowerCase())));
+  const _isExterneDoc = (d) => !!(d&&(d.dossierId || d.clientId || d.nature === "EXTERNE" || d._src === "dossierFile"));
   const filteredDocs = docs.filter(d=>
+    d && _canAccessDoc(d) &&
     (filterProcess==="all"||d.process===filterProcess) &&
     (filterNature==="all"||(d.category||"AUTRE")===filterNature) &&
     (filterCategory==="all"||(d.type||d.category||"AUTRE")===filterCategory) &&
-    (!search||(d.name+(d.tags||[]).join()).toLowerCase().includes(search.toLowerCase()))
+    (filterDocSource==="all" || (filterDocSource==="externe" ? _isExterneDoc(d) : !_isExterneDoc(d))) &&
+    (!search||((d.name||"")+(d.tags||[]).join()).toLowerCase().includes(search.toLowerCase()))
   );
   // FIX vDOCS-CLOSED — Inclure dans allArchives les documents liés aux dossiers terminés/archivés
-  const docsLinkedToClosedDossiers = docs.filter(d => d.dossierId && closedDossiers.some(cd => cd.id === d.dossierId));
+  const docsLinkedToClosedDossiers = docs.filter(d => d && d.dossierId && closedDossiers.some(cd => cd.id === d.dossierId));
   const allArchives = [
     ...archives,
     ...docsLinkedToClosedDossiers.filter(d => !archives.find(a => a.id === d.id)).map(d => ({
@@ -796,8 +805,8 @@ Notes : ${client.notes||"Aucune"}`;
       _fromClosedDossier: true,
       _linkedDossier: closedDossiers.find(cd => cd.id === d.dossierId),
     })),
-    ...closedDossiers.map(d=>({id:"DS-"+d.id,name:`Dossier ${d.ref||""} — ${d.client||""}`,type:"DOSSIER",category:"DOSSIER_CLOS",archivedAt:d.updatedAt,isDossier:true, _docsCount: docs.filter(x=>x.dossierId===d.id).length}))
-  ].filter(a=>!search||((a.name||"")+(a.category||"")).toLowerCase().includes(search.toLowerCase()));
+    ...closedDossiers.map(d=>({id:"DS-"+d.id,name:`Dossier ${d.ref||""} — ${d.client||""}`,type:"DOSSIER",category:"DOSSIER_CLOS",archivedAt:d.updatedAt,isDossier:true, _docsCount: docs.filter(x=>x&&x.dossierId===d.id).length}))
+  ].filter(a=>a&&(!search||((a.name||"")+(a.category||"")).toLowerCase().includes(search.toLowerCase())));
 
   const docsPerDossier = docs.reduce((a,d)=>{if(d.dossierId){a[d.dossierId]=(a[d.dossierId]||0)+1;}return a;},{});
 
@@ -1317,7 +1326,7 @@ Notes : ${client.notes||"Aucune"}`;
           ["archives",`🗃️ Archives`],
           ["classification","🏷️ Classification"],
         ].map(([id,l])=>(
-          <button key={id} onClick={async ()=>{setTab(id);setSelectedClient(null);}}
+          <button key={id} onClick={async ()=>{setTab(id);setSelectedClient(null);if(id!=="documents")setFilterDocSource("all");}}
             style={{background:tab===id?"#F9731622":"transparent",border:`1px solid ${tab===id?"#F9731666":T.border}`,borderRadius:7,padding:"7px 13px",color:tab===id?"#F97316":T.textMuted,fontWeight:tab===id?700:400,fontSize:11,position:"relative"}}>
             {l}
             {id==="crm"&&(crmStats.relancesRetard+crmStats.relancesAujourd)>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#EF4444",color:"#fff",borderRadius:"50%",width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{crmStats.relancesRetard+crmStats.relancesAujourd}</span>}
@@ -1340,6 +1349,10 @@ Notes : ${client.notes||"Aucune"}`;
           </select>
         </>}
         {tab==="documents"&&<>
+          {/* Distinction docs internes / externes (liés à des dossiers clients) */}
+          {[["all",`📄 Tous (${docs.length})`],["externe",`🤝 Clients/Partenaires (${docs.filter(_isExterneDoc).length})`],["interne",`🏢 Internes (${docs.filter(d=>!_isExterneDoc(d)).length})`]].map(([k,l])=>(
+            <button key={k} onClick={()=>setFilterDocSource(k)} style={{background:filterDocSource===k?"#6366F122":"transparent",border:`1px solid ${filterDocSource===k?"#6366F166":T.border}`,color:filterDocSource===k?"#6366F1":T.textMuted,borderRadius:7,padding:"5px 11px",cursor:"pointer",fontSize:10,fontWeight:filterDocSource===k?700:400}}>{l}</button>
+          ))}
           <select value={filterNature} onChange={e=>setFilterNature(e.target.value)} style={{background:T.surface2,border:`1px solid ${T.border}`,borderRadius:7,padding:"7px 8px",color:T.text,fontSize:11}}>
             <option value="all">Toutes catégories</option>{CATS.map(c=><option key={c} value={c}>{c}</option>)}
           </select>
@@ -1513,7 +1526,7 @@ Notes : ${client.notes||"Aucune"}`;
 
       {/* ══ TAB DOCUMENTS ══════════════════════════════════════════════════════ */}
       {tab==="documents"&&(
-        filteredDocs.length===0?<div style={{color:T.textMuted,textAlign:"center",padding:28}}>Aucun document importé</div>:(
+        filteredDocs.length===0?<div style={{color:T.textMuted,textAlign:"center",padding:28}}>{filterDocSource==="externe"?"Aucun document client/partenaire":filterDocSource==="interne"?"Aucun document interne":"Aucun document importé"}</div>:(
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
             {filteredDocs.map(d=>{
               const dossier=dossiers.find(x=>x.id===d.dossierId);
@@ -1524,10 +1537,14 @@ Notes : ${client.notes||"Aucune"}`;
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}>
                       <span style={{color:T.text,fontSize:11,fontWeight:700,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.name}</span>
-                      <span style={{background:"#6366F122",color:"#6366F1",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>{d.codif}</span>
+                      {_isExterneDoc(d)
+                        ? <span style={{background:"#F9731622",color:"#F97316",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>🤝 Externe</span>
+                        : <span style={{background:"#A855F722",color:"#A855F7",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>🏢 Interne</span>}
+                      {d.codif&&<span style={{background:"#6366F122",color:"#6366F1",borderRadius:4,padding:"1px 5px",fontSize:8,fontWeight:700,flexShrink:0}}>{d.codif}</span>}
                     </div>
                     <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                       <span style={{color:T.textDim,fontSize:9}}>{d.type} · {d.size} · {d.createdAt?.slice(0,10)} · {d.createdBy}</span>
+                      {d.accessLevel > 1 && <span style={{background:"#EF444415",color:"#EF4444",borderRadius:3,padding:"1px 5px",fontSize:8,fontWeight:700}}>🔒 Niv.{d.accessLevel}+</span>}
                       {dossier&&<span style={{background:"#3B82F622",color:"#3B82F6",borderRadius:3,padding:"1px 5px",fontSize:8}}>📋 {dossier.ref}</span>}
                       {client&&<span style={{background:"#F9731622",color:"#F97316",borderRadius:3,padding:"1px 5px",fontSize:8}}>👤 {client.nom}</span>}
                       {(d.tags||[]).map(t=><span key={t} style={{background:"#6366F122",color:"#6366F1",borderRadius:3,padding:"1px 5px",fontSize:8}}>#{t}</span>)}
@@ -1535,7 +1552,7 @@ Notes : ${client.notes||"Aucune"}`;
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
                     {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>viewDoc(d)} style={{background:"#10B98122",border:"1px solid #10B98144",color:"#10B981",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>👁️ Voir</button>}
-                    {(d.id||d.serverUrl||d.url||d.dataUrl)&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>⬇ DL</button>}
+                    {(d.id||d.serverUrl||d.url||d.dataUrl)&&_canAccessDoc(d)&&<button onClick={()=>downloadDoc(d)} style={{background:"#3B82F622",border:"1px solid #3B82F644",color:"#3B82F6",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>⬇ DL</button>}
                     {/* FIX v123 — bouton ✏️ manquant : documents non modifiables */}
                     {canEditDoc&&<button onClick={()=>openEditDoc(d)} title="Modifier" style={{background:"#6366F122",border:"1px solid #6366F144",color:"#6366F1",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>✏️</button>}
                     <button onClick={()=>archiveDoc(d)} style={{background:"#6B708022",border:"1px solid #6B708044",color:"#6B7080",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontSize:10}}>🗃️</button>
