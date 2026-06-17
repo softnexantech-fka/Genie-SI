@@ -938,7 +938,17 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
   const [paretoForm, setParetoForm] = useState({cause:"",freq:0});
   const savePareto = (d) => { setParetoItems(d); try{_lsSet("gc-pareto",JSON.stringify(d)); dsSave("gc-pareto",d).catch(()=>{});}catch (_) {} };
 
-  useRemoteSync({'gc-pdca': setPdca, 'gc-mckinsey': setMckinsey, 'gc-mc7s': setMc7s, 'gc-5m': setFiveM, 'gc-5s': setFiveS, 'gc-pca': setPca, 'gc-bcg': setBcgItems, 'gc-10m': setTenM, 'gc-resources': setResources, 'gc-porter': setPorter, 'gc-qqoqcp': setQqoqcp, 'gc-vrio': setVrio, 'gc-pareto': setParetoItems});
+  const PCA_DEFAULTS = {contexte:"",risques_majeurs:"",seuil_reprise:"",rto:"",rpo:"",equipe_crise:[],procedures:[]};
+  const QQOQCP_DEFAULTS = {Q1:"",Q2:"",O:"",Q3:"",C:"",P:""};
+  useRemoteSync({
+    'gc-pdca': setPdca, 'gc-mckinsey': setMckinsey, 'gc-mc7s': setMc7s, 'gc-5m': setFiveM,
+    'gc-5s': setFiveS,
+    // Normalisation défensive : fusionner avec les valeurs par défaut pour éviter les champs manquants
+    'gc-pca': (v) => setPca(v && typeof v === 'object' && !Array.isArray(v) ? {...PCA_DEFAULTS, ...v} : PCA_DEFAULTS),
+    'gc-bcg': setBcgItems, 'gc-10m': setTenM, 'gc-resources': setResources, 'gc-porter': setPorter,
+    'gc-qqoqcp': (v) => setQqoqcp(v && typeof v === 'object' && !Array.isArray(v) ? {...QQOQCP_DEFAULTS, ...v} : QQOQCP_DEFAULTS),
+    'gc-vrio': setVrio, 'gc-pareto': setParetoItems,
+  });
 
   const exportSwot = () => {
     const txt=`ANALYSE SWOT — GÉNIE CONSULTANT\n${new Date().toLocaleDateString("fr-FR")}\n\nFORCES (S)\n${swot.S}\n\nFAIBLESSES (W)\n${swot.W}\n\nOPPORTUNITÉS (O)\n${swot.O}\n\nMENACES (T)\n${swot.T}`;
@@ -976,7 +986,7 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
   };
 
   const generatePcaWithAI = async () => {
-    if (!pca.contexte.trim()) { gcAlert("Saisissez d'abord le contexte de votre activité."); return; }
+    if (!pca.contexte?.trim()) { gcAlert("Saisissez d'abord le contexte de votre activité."); return; }
     setPcaLoading(true);
     try {
       const resp = await fetch("https://api.anthropic.com/v1/messages", {
@@ -1070,10 +1080,10 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
       )}
 
       {tool==="dashboard" && (() => {
-        const hasSwot = Object.values(swot).some(v=>v.trim());
-        const hasPestel = Object.values(pestel).some(v=>v.trim());
-        const pdcaAvancement = pdca.do.avancement || 0;
-        const hasPca = pca.contexte.trim();
+        const hasSwot = Object.values(swot).some(v=>v?.trim());
+        const hasPestel = Object.values(pestel).some(v=>v?.trim());
+        const pdcaAvancement = pdca?.do?.avancement || 0;
+        const hasPca = pca.contexte?.trim();
         const hasBcg = bcgItems.length>0;
         const hasPorter = Object.values(porter).some(f=>f.notes?.trim());
         const hasVrio = vrio.length>0;
@@ -1092,7 +1102,7 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
           {id:"5m",label:"Diagramme 5M",desc:"Ishikawa — Causes & effets",color:"#F59E0B",icon:"🦴",done:fiveM.probleme?.trim()?.length>0,group:"Amélioration"},
           {id:"5s",label:"Méthode 5S",desc:"Organisation & performance",color:"#06B6D4",icon:"✅",done:false,group:"Amélioration"},
           {id:"pareto",label:"Pareto 80/20",desc:"Causes critiques vs triviales",color:"#EAB308",icon:"📊",done:paretoItems.length>0,group:"Amélioration"},
-          {id:"qqoqcp",label:"QQOQCP",desc:"Analyse structurée de problème",color:"#84CC16",icon:"❓",done:Object.values(qqoqcp).some(v=>v.trim()),group:"Amélioration"},
+          {id:"qqoqcp",label:"QQOQCP",desc:"Analyse structurée de problème",color:"#84CC16",icon:"❓",done:Object.values(qqoqcp).some(v=>v?.trim()),group:"Amélioration"},
           {id:"10m",label:"10M Crosby",desc:"Tortue Crosby — Qualité totale",color:"#10B981",icon:"🐢",done:Object.values(tenM).some(m=>m.score>0),group:"Qualité"},
           {id:"resources",label:"Ressources",desc:"Évaluation complète des ressources",color:"#0EA5E9",icon:"🗃️",done:hasResources,group:"Évaluation"},
           {id:"bsc",label:"Balanced Scorecard",desc:"Indicateurs stratégiques 4 axes",color:"#EC4899",icon:"🎯",done:false,group:"Évaluation"},
@@ -1767,7 +1777,7 @@ export function ConseilApp({ T, currentUser, setNotifications=_noop, taches=[], 
               </div>
             ))}
           </div>
-          {Object.values(qqoqcp).every(v=>v.trim())&&(
+          {Object.values(qqoqcp).every(v=>v?.trim())&&(
             <div style={{marginTop:10,background:"#22C55E15",border:"1px solid #22C55E44",borderRadius:8,padding:"8px 12px",color:"#22C55E",fontSize:11,fontWeight:700}}>✅ Analyse QQOQCP complète — Tous les axes sont renseignés</div>
           )}
         </div>
