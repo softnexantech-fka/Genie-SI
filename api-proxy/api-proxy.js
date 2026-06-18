@@ -1264,8 +1264,10 @@ const handleMulterError = (err, req, res, next) => {
 // ── Broadcast ────────────────────────────────────────────────────────────────
 // [C8] Prend en compte X-Socket-Id pour exclure l'expéditeur du broadcast
 function broadcast(event, payload, excludeSocketId = null) {
-  if (excludeSocketId) {
-    // Émettre à tous sauf l'expéditeur
+  // FIX BROADCAST-SELF — Exclure l'émetteur si son socket-id est connu.
+  // Les clients HTTP sans WebSocket ne fournissent pas x-socket-id → excludeSocketId=null
+  // → io.emit() leur envoie quand même le broadcast, ce qui est correct (ils ne boucleront pas).
+  if (excludeSocketId && typeof excludeSocketId === 'string') {
     for (const [sid] of io.sockets.sockets) {
       if (sid !== excludeSocketId) {
         io.to(sid).emit(event, payload);
@@ -1366,6 +1368,9 @@ io.on('connection', (socket) => {
       if (item.value === undefined || item.value === null) return false;
       
       // Check if key was wiped after item was created (global wipe)
+      // FIX WIPE-RACE-FLUSH — Si le wipe registry n'est pas encore chargé, bloquer par sécurité
+      // (mieux perdre un item offline que ressusciter un item supprimé)
+      if (!_wipeRegistryReady) return false;
       const wipeTs = _wipeRegistry[item.key];
       if (wipeTs && item.ts < wipeTs) {
         console.warn(`[flush_offline_queue] Item for key '${item.key}' predates wipe (${item.ts} < ${wipeTs}), skipping`);
@@ -1527,12 +1532,12 @@ function getWipeRegistryStats() {
 }
 
 // FIX SYNC-HB — Heartbeat serveur toutes les 30s : broadcast 'heartbeat_sync' à tous les clients.
-// On inclut maintenant la liste des clés à re-fetcher (wipe-registry inclus) pour une couverture totale.
+// FIX WIPE-RACE — Ne broadcaster le wipeRegistry que si le chargement initial est terminé
+// (_wipeRegistryReady=true). Sinon les clients écraseraient leur registre local avec {}.
 setInterval(() => {
   if (io.sockets.sockets.size === 0) return;
   const ts = Date.now();
-  io.emit('heartbeat_sync', { ts, wipeRegistry: _wipeRegistry });
-  // Log discret (toutes les 10 heartbeats = 5 min) pour éviter de noyer les logs
+  io.emit('heartbeat_sync', { ts, wipeRegistry: _wipeRegistryReady ? _wipeRegistry : undefined });
   if (Math.floor(ts / 30_000) % 10 === 0) {
     console.log(`[HB] Heartbeat sync → ${io.sockets.sockets.size} client(s) connecté(s)`);
   }
@@ -1840,6 +1845,14 @@ const CRITICAL_EMPTY_ARRAY_KEYS = new Set([
   // FIX BUG#9 — Données financières sensibles : accès GUEST interdit même en lecture
   'gc-journal','gc-budget','gc-factures','gc-devis','gc-paie-transferts','gc-paie-taux',
   'gc-sirh-evaluations','gc-sirh-presences','gc-risks','gc-audit-checklist',
+  // FIX CRIT-EMPTY — Clés config/structure : POST [] ne doit jamais écraser des données existantes
+  'gc-cabinet-info','gc-fiscal-config','gc-delai-config','gc-process-config','gc-process-app-matrix',
+  'gc-app-habilitations','gc-app-access-codes','gc-circuits','gc-orgigram-nodes','gc-orgigram-links',
+  'gc-codif-registry','gc-si-appearance','gc-sirh-fichiers','gc-recrutements',
+  'gc-crm-relances','gc-crm-interactions','gc-crm-opps','gc-crm-clients',
+  'gc-jur-kyc','gc-jur-docs','gc-jur-conventions','gc-achievements',
+  'gc-stocks','gc-achats','gc-logmod-stocks','gc-inventaires',
+  'gc-audit-prog','gc-audit-grille-taches','gc-comm-contacts',
 ]);
 
 // FIX BUG-B18 — Clés de configuration globale qui ne doivent être modifiables
@@ -2047,21 +2060,22 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
           }
         } catch (_) {}
         
-        // FIX PHASE-1-C: Filter out any resurrected items (present in tombstones)
-        // Especially important when client was offline and sends stale data with deleted items
-        const filteredIncoming = sanitized.filter(item => {
+        // FIX MERGE-ARRAY — Utiliser finalValue (déjà filtré par anti-resurrection) et non sanitized.
+        // sanitized = données brutes envoyées par le client (pré-filtrées)
+        // finalValue = données post-anti-resurrection (items ressuscités retirés)
+        // Appliquer en plus le filtre tombstones pour couvrir les cas où le hash SHA ne matcherait pas.
+        const filteredIncoming = finalValue.filter(item => {
           if (!item?.id) return true;
           const isInTombstone = tombstonedIds.has(String(item.id));
           if (isInTombstone) {
-            console.log(`[ANTI-RESURRECTION-BE] Filtered resurrected item ${key}/${item.id}`);
+            console.log(`[ANTI-RESURRECTION-BE] Filtered tombstoned item ${key}/${item.id}`);
           }
           return !isInTombstone;
         });
-        
+
         // Items du serveur absents de l'entrant (et non-tombstonés) → à préserver
         const preserved = existing.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
-        // Filtrer aussi l'entrant lui-même (exclure tombstonés dans l'entrant) - USE filteredIncoming
-        const filteredSanitized = filteredIncoming.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
+        const filteredSanitized = filteredIncoming;
         // Pour les conflits (même ID dans entrant ET serveur) : garder la version la plus récente
         const existingById = new Map(existing.map(i => [String(i?.id), i]));
         const resolvedIncoming = filteredSanitized.map(item => {
@@ -2253,6 +2267,8 @@ app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, a
   if (!itemId) return res.status(400).json({ error: 'itemId requis' });
 
   // 1. Enregistrer le tombstone AVANT toute modification
+  // FIX TOMBSTONE-RACE — Si la persistance du tombstone échoue, annuler la suppression.
+  // Mieux vaut refuser de supprimer que de supprimer sans tombstone → item ressuscitable.
   try {
     let tombstones = {};
     if (dbReady) tombstones = (await dbGet('gc-tombstones')) || {};
@@ -2261,7 +2277,8 @@ app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, a
     tombstones[key] = [...tbs].slice(-5000);
     if (dbReady) await dbSet('gc-tombstones', tombstones, req.user?.id || 'anonymous');
   } catch (tErr) {
-    console.warn('[DELETE-ITEM] Erreur enregistrement tombstone:', tErr.message);
+    console.error('[DELETE-ITEM] Impossible de persister le tombstone — suppression annulée:', tErr.message);
+    return res.status(500).json({ error: 'Erreur interne : impossible de sécuriser la suppression, réessayez.' });
   }
 
   // 2. Supprimer l'item du tableau en base

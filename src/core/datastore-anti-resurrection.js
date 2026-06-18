@@ -147,31 +147,34 @@ export async function filterResurrectedItems(key, items) {
     return { filtered: [], blockedCount: 0 };
   }
   
+  // FIX ANTI-RES-PERF — Traitement parallèle avec Promise.all au lieu de séquentiel.
+  // L'ancienne boucle await-in-for faisait N hash SHA-256 en série → lent sur grands tableaux.
+  const results = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const isResurrected = await isResurrectionAttempt(key, item);
+        return { item, isResurrected };
+      } catch (e) {
+        console.warn(`[Anti-Resurrection] Error checking ${key}/${item?.id}:`, e.message);
+        return { item, isResurrected: false }; // fail-open
+      }
+    })
+  );
+
   const filtered = [];
   const blocked = [];
-  
-  for (const item of items) {
-    try {
-      const isResurrected = await isResurrectionAttempt(key, item);
-      if (isResurrected) {
-        blocked.push(item?.id);
-      } else {
-        filtered.push(item);
-      }
-    } catch (e) {
-      // On error, include item (fail-open for data safety)
-      console.warn(`[Anti-Resurrection] Error checking ${key}/${item?.id}:`, e.message);
-      filtered.push(item);
-    }
+  for (const { item, isResurrected } of results) {
+    if (isResurrected) blocked.push(item?.id);
+    else filtered.push(item);
   }
-  
+
   if (blocked.length > 0) {
     console.warn(
       `[Anti-Resurrection] Blocked ${blocked.length} resurrected items in "${key}": ` +
       blocked.slice(0, 10).join(', ') + (blocked.length > 10 ? '...' : '')
     );
   }
-  
+
   return { filtered, blockedCount: blocked.length };
 }
 

@@ -345,15 +345,24 @@ const _rateLimitState = new Map(); // key → { until:number, fails:number }
 
 const REGRESSION_KEYS = new Set([
   'users', 'dossiers', 'taches', 'rdvs', 'partners', 'gc-users',
-  // FIX v156 — Clés Finance/Audit/Logistique/CRM ajoutées : un poste frais (LS vide)
-  // ne doit jamais écraser les données existantes du serveur avec un tableau vide.
-  'gc-journal', 'gc-budget', 'gc-factures', 'gc-stocks', 'gc-achats',
-  'gc-logmod-stocks', 'gc-inventaires',
-  'gc-risks', 'gc-audit-checklist', 'gc-audit-prog',
-  'gc-crm-relances', 'gc-crm-interactions', 'gc-crm-opps',
-  'gc-crm-clients', 'gc-jur-kyc', 'gc-jur-docs',
+  // Finance
+  'gc-journal', 'gc-budget', 'gc-factures', 'gc-devis', 'gc-stocks', 'gc-achats',
+  'gc-logmod-stocks', 'gc-inventaires', 'gc-paie-transferts', 'gc-paie-taux',
+  // Audit / Risques
+  'gc-risks', 'gc-audit-checklist', 'gc-audit-prog', 'gc-audit-grille-taches',
+  // CRM / Juridique
+  'gc-crm-relances', 'gc-crm-interactions', 'gc-crm-opps', 'gc-crm-clients',
+  'gc-jur-kyc', 'gc-jur-docs', 'gc-jur-conventions',
+  // Fichiers / Documents
   'gc-docs-unified', 'gc-si-docs', 'gc-standalone-docs',
-  'gc-dossier-files', 'gc-sirh-presences', 'gc-sirh-leaves',
+  'gc-dossier-files', 'gc-sirh-fichiers',
+  // SIRH
+  'gc-sirh-presences', 'gc-sirh-leaves', 'gc-sirh-evaluations', 'gc-recrutements',
+  // Config cabinet — un client frais ne doit JAMAIS écraser la config
+  'gc-cabinet-info', 'gc-fiscal-config', 'gc-delai-config', 'gc-process-config',
+  'gc-process-app-matrix', 'gc-app-habilitations', 'gc-app-access-codes',
+  'gc-circuits', 'gc-orgigram-nodes', 'gc-orgigram-links', 'gc-codif-registry',
+  'gc-si-appearance', 'siAppearance', 'gc-achievements', 'gc-comm-contacts',
 ]);
 function isArrayOfObjectsWithIds(value) {
   return Array.isArray(value) && value.length > 0 && value.every(item => item && typeof item === 'object' && (typeof item.id === 'string' || typeof item.id === 'number'));
@@ -1313,9 +1322,15 @@ export async function dsSave(key, value, userId = null, options = {}) {
     // Maintenant : on écrase __ts__ avec le timestamp serveur confirmé → comparaison cohérente.
     try {
       const resp = await r.clone().json().catch(() => null);
-      const confirmedTs = resp?.updatedAt || resp?.ts || _writeNow;
-      _lsSet('__ts__:' + key, String(confirmedTs));
-      _cache.set(key, { data: sendValue, ts: confirmedTs });
+      // FIX TS-FALLBACK — N'utiliser _writeNow (timestamp client) comme fallback que si le serveur
+      // n'a pas retourné de timestamp. Cela évite de stocker un timestamp client incorrect qui
+      // ferait croire que le local est plus récent que le serveur lors du prochain broadcast.
+      const confirmedTs = resp?.updatedAt || resp?.ts || null;
+      if (confirmedTs) {
+        _lsSet('__ts__:' + key, String(confirmedTs));
+        _cache.set(key, { data: sendValue, ts: confirmedTs });
+      }
+      // Si pas de timestamp serveur : on laisse __ts__ = _writeNow (déjà écrit avant le fetch)
     } catch {}
     // Dès qu'on réussit un save en ligne, tenter aussi de vider la file en attente.
     flushOfflineQueue().catch(() => {});
