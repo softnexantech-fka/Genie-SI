@@ -96,13 +96,14 @@ export function useSyncedState(key, fallback = null) {
   }, [key]); // key est la seule dépendance stable voulue — fallback intentionnellement omis
 
   const setSyncedData = useCallback((value) => {
-    // FIX BUG#7 — utiliser l'updater fonctionnel de setData pour éviter la closure stale.
-    // Sans ça, deux appels rapides utilisaient le même `data` capturé, le second écrasait le premier.
+    // Functional updater avoids stale closure. dsSave deferred to microtask to avoid
+    // React 19 StrictMode double-invocation of updaters causing double saves.
+    let resolved;
     setData(prev => {
-      const resolved = typeof value === 'function' ? value(prev) : value;
-      dsSave(key, resolved);
+      resolved = typeof value === 'function' ? value(prev) : value;
       return resolved;
     });
+    Promise.resolve().then(() => { if (resolved !== undefined) dsSave(key, resolved); });
   }, [key]);
 
   const deleteItem = useCallback(async (itemId) => {
@@ -114,11 +115,12 @@ export function useSyncedState(key, fallback = null) {
   }, [data, key]);
 
   const setSyncedDataForce = useCallback((value) => {
+    let resolved;
     setData(prev => {
-      const resolved = typeof value === 'function' ? value(prev) : value;
-      dsSave(key, resolved, null, { forceOverwrite: true });
+      resolved = typeof value === 'function' ? value(prev) : value;
       return resolved;
     });
+    Promise.resolve().then(() => { if (resolved !== undefined) dsSave(key, resolved, null, { forceOverwrite: true }); });
   }, [key]);
 
   return [data, setSyncedData, deleteItem, setSyncedDataForce];
@@ -145,7 +147,12 @@ export function useRemoteSync(syncMap) {
       await Promise.allSettled(entries().map(async ([key, setter]) => {
         try {
           const val = await dsGet(key, null);
-          if (val !== null && val !== undefined) setter(val);
+          // Never overwrite non-null state with an empty array — server may not have
+          // received the data yet (new session, offline writes, etc.)
+          if (val !== null && val !== undefined) {
+            if (Array.isArray(val) && val.length === 0) return;
+            setter(val);
+          }
         } catch {}
       }));
     };
@@ -159,7 +166,10 @@ export function useRemoteSync(syncMap) {
       if (!setter) return;
       try {
         const val = await dsGet(key, null);
-        if (val !== null && val !== undefined) setter(val);
+        if (val !== null && val !== undefined) {
+          if (Array.isArray(val) && val.length === 0) return;
+          setter(val);
+        }
       } catch {}
     };
     window.addEventListener('storage', handler);
