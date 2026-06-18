@@ -48,7 +48,12 @@ export function useSyncedState(key, fallback = null) {
       if (event.action === 'force_resync' || event.action === 'heartbeat') {
         dsGet(key, fallback).then(val => {
           if (!mountedRef.current) return;
-          if (val !== null && val !== undefined) { lsSave(key, val); setData(val); }
+          // Ne jamais écraser l'état local avec un tableau vide du serveur — le serveur
+          // peut temporairement retourner [] si les données ne sont pas encore arrivées.
+          if (val !== null && val !== undefined) {
+            if (Array.isArray(val) && val.length === 0) return;
+            lsSave(key, val); setData(val);
+          }
         }).catch(() => {});
         return;
       }
@@ -71,6 +76,7 @@ export function useSyncedState(key, fallback = null) {
       dsGet(key, fallback).then(val => {
         if (!mountedRef.current) return;
         if (val !== null && val !== undefined) {
+          if (Array.isArray(val) && val.length === 0) return; // ne pas écraser avec []
           lsSave(key, val);
           setData(val);
         }

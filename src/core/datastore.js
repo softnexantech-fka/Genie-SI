@@ -584,12 +584,19 @@ async function initWebSocket() {
       _socketReady = true;
       console.log('[DS] WebSocket connecté:', _socket.id);
 
-      // FIX SYNC-RELOAD — Vider les timestamps locaux à chaque reconnexion (Ctrl+R, reprise réseau)
-      // Cela force le serveur à faire autorité sur la prochaine lecture dsGet.
+      // FIX SYNC-RECONNECT — Ne vider que les timestamps anciens (> 60s) lors d'une reconnexion.
+      // L'ancienne version vidait TOUS les timestamps à chaque reconnexion réseau, ce qui
+      // forçait le serveur à faire autorité même si le client venait d'écrire des données non
+      // encore flushées — entraînant une perte de données au reconnect.
       try {
-        const tsKeys = Object.keys(localStorage).filter(k => k.startsWith('__ts__:') || k.startsWith('__svts__:'));
+        const now = Date.now();
+        const tsKeys = Object.keys(localStorage).filter(k => {
+          if (!k.startsWith('__ts__:') && !k.startsWith('__svts__:')) return false;
+          const v = parseInt(localStorage.getItem(k) || '0');
+          return v < now - 60_000; // Seulement les timestamps plus vieux que 60s
+        });
         tsKeys.forEach(k => localStorage.removeItem(k));
-        if (tsKeys.length) console.log(`[DS] Reconnect: ${tsKeys.length} timestamps locaux vidés → serveur fait autorité`);
+        if (tsKeys.length) console.log(`[DS] Reconnect: ${tsKeys.length} timestamps anciens vidés → serveur fait autorité`);
       } catch {}
 
       // [D2] Identifier avec JWT token pour vérification côté serveur

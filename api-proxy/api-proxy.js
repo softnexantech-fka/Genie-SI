@@ -2535,8 +2535,9 @@ app.get('/api/files/:id', rateLimiter(300), authenticateTokenOptional, async (re
   }
   if (!meta) return res.status(404).json({ error: 'Fichier introuvable' });
 
-  // Validation anti-path-traversal : le chemin absolu doit rester dans UPLOADS_DIR
-  const realPath = path.resolve(meta.disk_path || meta.compressed_path || '');
+  // FIX FILE-COMPRESSED — Pour les fichiers compressés, disk_path pointe vers l'original
+  // supprimé par compressIfNeeded(). Utiliser compressed_path en priorité.
+  const realPath = path.resolve(meta.compressed ? (meta.compressed_path || meta.disk_path || '') : (meta.disk_path || meta.compressed_path || ''));
   const uploadsRoot = path.resolve(UPLOADS_DIR);
   if (!realPath.startsWith(uploadsRoot + path.sep) && realPath !== uploadsRoot) {
     console.error(`[SECURITY] Path traversal détecté pour fichier ${id}: ${realPath}`);
