@@ -1,6 +1,6 @@
 {
   "name": "si-genie-proxy",
-  "version": "10.6.0",
+  "version": "10.6.1",
   "description": "SI Génie Consultant — Proxy Backend (SQLite + WebSocket + Stockage disque)",
   "type": "module",
   "main": "api-proxy.js",

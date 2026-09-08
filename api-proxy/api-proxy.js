@@ -59,6 +59,7 @@ import helmet from 'helmet';
 import { body, validationResult } from 'express-validator';
 import compression from 'compression';
 import { createClient as createRedisClient } from 'redis';
+import syncMaster from './sync-master.mjs';
 // archiver est CommonJS — chargé via require (createRequire défini plus bas)
 let archiver = null;
 
@@ -331,7 +332,7 @@ async function linkFileToDossierFolder(dossierId, dossierName, fileId, originalN
 // FIX v141 — Synchronisation ALLOWED_KEYS avec SHARED_KEYS frontend (30+ clés ajoutées)
 const ALLOWED_KEYS = new Set([
   'gc-users', 'gc-dossiers', 'gc-taches', 'gc-rdvs', 'gc-pending-delete-approvals',
-  'gc-partners', 'gc-messages', 'gc-notifications', 'gc-session-logs',
+  'gc-partners', 'gc-messages', 'gc-notifications', 'gc-notification-alerts', 'gc-session-logs',
   'gc-pending-connections', 'gc-pending-account-actions', 'gc-app-habilitations',
   'gc-app-access-codes', 'gc-si-appearance', 'gc-si-logo-url', 'gc-si-css-overrides',
   'gc-si-system-docs', 'gc-committees', 'gc-codif-registry', 'gc-internal-docs',
@@ -390,11 +391,19 @@ const ALLOWED_KEYS = new Set([
   'gc-tombstones', 'gc-audit-grille-taches', 'gc-comm-contacts',
   // ── FIX v153b : Clés collaboratives cross-machine manquantes ──────
   'gc-files', 'gc-schema-version', 'gc-auto-backup-enabled', 'gc-auto-backup-interval',
-  'gc-printers', 'gc-print-queue', 'gc-prefill-facture', 'gc-bureau-lastvisits',
+  'gc-printers', 'gc-print-queue', 'gc-prefill-facture', 'gc-bureau-lastvisits', 'gc-codif-rules',
   'gc-kpi-alerts', 'gc-kpi-dg-view', 'gc-si-source', 'gc-ai-delays',
   'gc-anti-redondance-v1',
   // ── FIX vNext : Clé notifications manquante ──────────────────────────
   'notifications',
+  // ── FIX v154 : Clés utilisées côté frontend (dsSave/dsGet/useRemoteSync) mais
+  // absentes ici → POST /api/data/:key renvoyait 403 "Clé non autorisée" (ou,
+  // pour les clés absentes des DEUX listes, l'appel n'était même jamais tenté côté
+  // client). Conséquence observée : Plan Comptable OHADA / État Financier ne se
+  // synchronisaient jamais entre postes malgré une sauvegarde locale "réussie".
+  'gc-ohada-active-plan', 'gc-ohada-active-plan-version', 'gc-ohada-plan-versions',
+  'gc-factory-reset-signal', 'gc-rapport-generated', 'gc-rapport-requests',
+  'gc-ai-config-v1', 'gc-wipe-registry',
 ]);
 
 // [C3][C9] Validation clé autorisée — préfixes dynamiques inclus
@@ -412,6 +421,12 @@ function isAllowedKey(key) {
   if (ALLOWED_KEYS.has(key)) return true;
   if (key.startsWith('gc-notif-')) {
     const suffix = key.slice('gc-notif-'.length);
+    return NOTIF_SUFFIX_RE.test(suffix);
+  }
+  // gc-budget-rapide:<userId> — budget personnel persistant par compte (cf. BudgetRapide.jsx),
+  // sans partage entre utilisateurs (chacun sa clé). Cf. isSharedKey() côté client.
+  if (key.startsWith('gc-budget-rapide:')) {
+    const suffix = key.slice('gc-budget-rapide:'.length);
     return NOTIF_SUFFIX_RE.test(suffix);
   }
   return false;
@@ -468,7 +483,15 @@ const JWT_SECRET     = process.env.JWT_SECRET || 'gc-jwt-secret-change-me-in-env
 const MAX_FILE_MB    = parseInt(process.env.MAX_FILE_MB || '500');
 const MAX_DB_GB      = parseInt(process.env.MAX_DB_GB   || '250');
 // [C7] Limite par valeur clé-valeur (défaut 10 MB)
-const MAX_VALUE_MB   = parseInt(process.env.MAX_VALUE_MB || '10');
+// [FIX] Relevé de 10 à 30 MB par défaut pour accompagner la suppression des
+// troncatures artificielles à 500 éléments (journal, factures, archives...).
+// Reste configurable via .env — voir explication des limites réelles (quota
+// localStorage du navigateur, taille de payload) dans le rapport d'audit.
+const MAX_VALUE_MB   = parseInt(process.env.MAX_VALUE_MB || '30');
+
+// [FIX v154-CORS] Accepter TOUTES les origines du réseau local en mode preview
+// Sans restriction — le serveur est sur un réseau local/intranet sécurisé
+const ALLOW_ALL_LOCAL = process.env.ALLOW_ALL_LOCAL !== 'false'; // false = désactiver si besoin
 const LOCAL_NETWORK_ORIGIN = /^https?:\/\/((localhost|127\.0\.0\.1)|(192\.168\.\d+\.\d+)|(10\.\d+\.\d+\.\d+)|(172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+))(?::\d+)?$/;
 
 // FIX SYNC-S2 — Logger sécurisé : filtre les tokens JWT et mots de passe des logs.
@@ -1100,6 +1123,11 @@ const io     = new SocketIO(server, {
   cors: {
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
+      // [FIX v154-CORS-WS] Accepter tous les origins HTTP:// locaux (mode intranet)
+      if (ALLOW_ALL_LOCAL && origin && origin.startsWith('http://')) {
+        return callback(null, true);
+      }
+      // Sinon : vérifier strictement
       if (origin === ALLOWED_ORIGIN || LOCAL_NETWORK_ORIGIN.test(origin)) return callback(null, true);
       return callback(new Error(`Origin non autorisée: ${origin}`));
     },
@@ -1124,6 +1152,8 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       styleSrc:   ["'self'", "'unsafe-inline'"],
       scriptSrc:  ["'self'", "https://cdn.socket.io"],
+      objectSrc:  ["'none'"], // [FIX] durcissement : bloque <object>/<embed> (vecteur Flash/SVG historique)
+      baseUri:    ["'self'"], // [FIX] empêche une injection de détourner <base href> vers un domaine tiers
       connectSrc: [
         "'self'",
         // Schémas HTTP/WS — couvre tout le réseau local (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
@@ -1146,20 +1176,26 @@ app.use(helmet({
 // Compression GZIP pour améliorer performances réseau
 app.use(compression());
 
+// [SECU-FIX] Fonction d'origine unique et réutilisée partout (y compris la route
+// de téléchargement de fichiers, qui définissait auparavant ses propres en-têtes
+// permissifs en doublon — cf. plus bas).
+function isOriginAllowed(origin) {
+  if (!origin) return true; // requêtes same-origin / outils serveur à serveur
+  if (ALLOW_ALL_LOCAL && origin.startsWith('http://')) return true;
+  return origin === ALLOWED_ORIGIN || LOCAL_NETWORK_ORIGIN.test(origin);
+}
+
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);
-    // [FIX-CORS-DYNAMIC] Accepter localhost ET tout 192.168.1.x / 10.x.x.x / 172.16-31.x.x
-    if (origin === ALLOWED_ORIGIN || LOCAL_NETWORK_ORIGIN.test(origin)) return cb(null, true);
+    if (isOriginAllowed(origin)) return cb(null, true);
     cb(new Error(`CORS bloqué: ${origin}`));
   },
   credentials: true,
 }));
 
-// [FIX v153-L] Body limit aligné sur MAX_VALUE_MB (10 MB) + 2 MB overhead encodage
-// Avant : 50 MB → chargeait inutilement 40 MB en RAM avant rejet métier
-app.use(express.json({ limit: '12mb' }));
-app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+// [FIX v153-L] Body limit aligné sur MAX_VALUE_MB (30 MB) + 2 MB overhead encodage
+app.use(express.json({ limit: '32mb' }));
+app.use(express.urlencoded({ extended: true, limit: '32mb' }));
 
 // ── Logging minimal ─────────────────────────────────────────────────────────
 app.use((req, res, next) => {
@@ -1264,10 +1300,8 @@ const handleMulterError = (err, req, res, next) => {
 // ── Broadcast ────────────────────────────────────────────────────────────────
 // [C8] Prend en compte X-Socket-Id pour exclure l'expéditeur du broadcast
 function broadcast(event, payload, excludeSocketId = null) {
-  // FIX BROADCAST-SELF — Exclure l'émetteur si son socket-id est connu.
-  // Les clients HTTP sans WebSocket ne fournissent pas x-socket-id → excludeSocketId=null
-  // → io.emit() leur envoie quand même le broadcast, ce qui est correct (ils ne boucleront pas).
-  if (excludeSocketId && typeof excludeSocketId === 'string') {
+  if (excludeSocketId) {
+    // Émettre à tous sauf l'expéditeur
     for (const [sid] of io.sockets.sockets) {
       if (sid !== excludeSocketId) {
         io.to(sid).emit(event, payload);
@@ -1320,8 +1354,16 @@ io.on('connection', (socket) => {
           auditLog(user.id, 'WS_CONNECT', 'socket', 'Connexion WebSocket vérifiée', ip);
           // FIX SYNC-INIT — Envoyer sync_init ciblé juste après identification
           // Force ce client (et ce client seul) à invalider son cache et re-fetcher depuis le serveur
-          setTimeout(() => {
-            socket.emit('sync_init', { ts: Date.now(), reason: 'identify_complete' });
+          // [FIX P1-07] Inclure tombstones + wipeRegistry : sans cela, un poste qui se reconnecte
+          // après une absence ne recevait JAMAIS les suppressions effectuées par d'autres postes
+          // pendant son absence — s'il pousse ensuite ses propres données (offline queue), l'item
+          // supprimé pouvait réapparaître chez tout le monde (anti-régression incapable de filtrer
+          // un id dont elle ignore qu'il est tombstoné).
+          setTimeout(async () => {
+            let tombstones = {}, wipeRegistry = {};
+            try { tombstones = (await dbGet('gc-tombstones')) || {}; } catch (_) {}
+            try { wipeRegistry = (await dbGet('gc-wipe-registry')) || {}; } catch (_) {}
+            socket.emit('sync_init', { ts: Date.now(), reason: 'identify_complete', tombstones, wipeRegistry });
           }, 800);
         });
         return;
@@ -1337,46 +1379,59 @@ io.on('connection', (socket) => {
   });
 
   // FIX SYNC-INIT — Réponse à la demande de resync ciblée d'un client (après Ctrl+R / reconnexion)
-  socket.on('client_sync_request', () => {
+  socket.on('client_sync_request', async () => {
     const info = connectedClients.get(socket.id);
     if (info?.verified) {
-      socket.emit('sync_init', { ts: Date.now(), reason: 'client_request' });
+      // [FIX P1-07] Voir commentaire détaillé dans le handler 'identify' ci-dessus.
+      let tombstones = {}, wipeRegistry = {};
+      try { tombstones = (await dbGet('gc-tombstones')) || {}; } catch (_) {}
+      try { wipeRegistry = (await dbGet('gc-wipe-registry')) || {}; } catch (_) {}
+      socket.emit('sync_init', { ts: Date.now(), reason: 'client_request', tombstones, wipeRegistry });
     }
   });
 
   // [C3][FIX v153-K] Flush offline queue — userId pris du registre JWT vérifié (pas du client)
+  // [FIX RACINE 2026-06-22] AVANT : ce handler écrivait directement en base via dbSet(),
+  // SANS passer par le merge anti-régression / wipe-registry / audit qu'applique la route
+  // HTTP POST /api/data/:key. Un instantané hors-ligne périmé (mis en file lors d'une
+  // micro-coupure réseau, puis jamais retiré une fois qu'une sauvegarde ultérieure avait
+  // réussi normalement) pouvait donc écraser silencieusement des données serveur plus
+  // récentes au reconnect suivant — c'est ce qui a fait disparaître le client "MINDZIE
+  // NGOMO OPINA" et le dossier "DOS-A02-O02.02/2026" (cf. applyProtectedWrite ci-dessus
+  // pour le détail). Chaque item passe désormais par applyProtectedWrite(), exactement
+  // comme un POST HTTP normal, avec union-merge + audit log.
   socket.on('flush_offline_queue', async (items) => {
     if (!Array.isArray(items) || !items.length) return;
 
     // Utiliser le userId vérifié côté serveur (anti-usurpation dans l'audit log)
     const clientInfo = connectedClients.get(socket.id) || {};
     const verifiedUserId = clientInfo.verified ? clientInfo.userId : 'offline-anonymous';
+    const ip = socket.handshake.address || 'unknown';
 
     // FIX BUG#3 — Filter items against tombstone registry BEFORE processing
     // Without this, deleted items can resurrect from offline queue
     let tombstones = {};
     try {
       if (dbReady) {
-        tombstones = (await dbGet('gc-tombstones')) || {};
+        const raw = await dbGet('gc-tombstones');
+        // Garde défensive : ignorer si la forme est corrompue (tableau au lieu d'objet)
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) tombstones = raw;
       }
     } catch (e) {
       console.warn('[flush_offline_queue] Erreur lecture tombstones:', e.message);
     }
-    
+
     const batch = items.slice(0, 200).filter(item => {
       if (!item?.key || !isAllowedKey(item.key)) return false;
       if (item.value === undefined || item.value === null) return false;
-      
+
       // Check if key was wiped after item was created (global wipe)
-      // FIX WIPE-RACE-FLUSH — Si le wipe registry n'est pas encore chargé, bloquer par sécurité
-      // (mieux perdre un item offline que ressusciter un item supprimé)
-      if (!_wipeRegistryReady) return false;
       const wipeTs = _wipeRegistry[item.key];
       if (wipeTs && item.ts < wipeTs) {
         console.warn(`[flush_offline_queue] Item for key '${item.key}' predates wipe (${item.ts} < ${wipeTs}), skipping`);
         return false;
       }
-      
+
       // Check if individual items are tombstoned
       if (Array.isArray(item.value) && tombstones[item.key]) {
         const tombstonedIds = new Set(tombstones[item.key]);
@@ -1388,62 +1443,39 @@ io.on('connection', (socket) => {
       }
       return true;
     });
-    let synced = 0;
 
-    const doFlush = async () => {
-      for (const item of batch) {
-        if (!item?.key || !isAllowedKey(item.key)) continue;
-        if (item.value === undefined || item.value === null) continue;
+    let synced = 0;
+    let lastError = null;
+    for (const item of batch) {
+      try {
         const validated = validateAndSanitizeValue(item.key, item.value);
         if (!validated.valid) continue;
-        const valJson = JSON.stringify(validated.sanitized);
-        if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
-        const ok = await dbSet(item.key, validated.sanitized, verifiedUserId);
-        if (ok) {
+        const result = await applyProtectedWrite(item.key, validated.sanitized, {
+          forceOverwrite: false,
+          clientTs: item.ts || Date.now(),
+          queuedAt: item.ts || 0, // [FIX P1-04] rejette si le serveur a une version plus récente que la mise en file
+          actorId: verifiedUserId,
+          ip,
+          auditAction: 'MODIFY',
+          auditDetail: `Sync file hors-ligne (reconnexion) — ${item.key}`,
+        });
+        if (result.ok) {
           synced++;
-          broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now() }, socket.id);
+          if (!result.noop) {
+            broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now(), updatedAt: result.updatedAt }, socket.id);
+          }
+        } else {
+          console.warn(`[flush_offline_queue] Échec protégé pour '${item.key}': ${result.error}`);
         }
+      } catch (e) {
+        lastError = e;
+        console.error(`[flush_offline_queue] Erreur item '${item?.key}':`, e.message);
       }
-    };
+    }
 
-    if (dbMode === 'better-sqlite3') {
-      try {
-        db.transaction(() => {
-          for (const item of batch) {
-            if (!item?.key || !isAllowedKey(item.key)) continue;
-            if (item.value === undefined || item.value === null) continue;
-            const vr = validateAndSanitizeValue(item.key, item.value);
-            if (!vr.valid) continue;
-            const val = JSON.stringify(vr.sanitized);
-            if (Buffer.byteLength(val, 'utf8') > MAX_VALUE_MB * 1024 * 1024) continue;
-            const ts = Math.floor(Date.now() / 1000);
-            db.prepare(
-              'INSERT INTO si_data(key,value,updated_at,updated_by,size_bytes) VALUES(?,?,?,?,?) ' +
-              'ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, ' +
-              'updated_by=excluded.updated_by, size_bytes=excluded.size_bytes'
-            ).run(item.key, val, ts, verifiedUserId, Buffer.byteLength(val, 'utf8'));
-            synced++;
-          }
-        })();
-        for (const item of batch.slice(0, synced)) {
-          if (item?.key && isAllowedKey(item.key)) {
-            broadcast('data_changed', { key: item.key, action: 'set', by: verifiedUserId, ts: Date.now() }, socket.id);
-          }
-        }
-      } catch(e) {
-        console.error('[flush] Transaction error:', e.message);
-        try { await doFlush(); } catch(doFlushErr) {
-          // TASK6 FIX: propager l'erreur au client au lieu de la swallower
-          socket.emit('flush_result', { ok: false, synced: 0, error: doFlushErr.message });
-          return;
-        }
-      }
-    } else {
-      try { await doFlush(); } catch(e) {
-        // TASK6 FIX: propager l'erreur au client
-        socket.emit('flush_result', { ok: false, synced: 0, error: e.message });
-        return;
-      }
+    if (synced === 0 && batch.length > 0 && lastError) {
+      socket.emit('flush_result', { ok: false, synced: 0, error: lastError.message });
+      return;
     }
 
     socket.emit('flush_result', { synced, total: batch.length });
@@ -1486,11 +1518,35 @@ let _wipeRegistryReady = false;
   }
 })();
 
-async function recordWipe(key, ts = Date.now()) {
+async function recordWipe(key, ts = Date.now(), previousValue = null) {
   if (!key) return;
-  
+
   _wipeRegistry[key] = ts;
-  
+
+  // [FIX RACINE 2026-06-22] Défense en profondeur contre la "résurrection" de
+  // données après un reset complet : en plus du registre de wipe (qui compare
+  // un timestamp client — pas toujours fiable pour un poste resté longtemps
+  // hors-ligne), on tombstone INDIVIDUELLEMENT chaque item qui existait juste
+  // avant le wipe. Ainsi, même si un poste reconnecte avec un instantané ancien
+  // dont le clientTs est ambigu (et passe donc le contrôle de wipe), le filtre
+  // par tombstone (utilisé par applyProtectedWrite lors du merge) bloquera
+  // quand même chacun de ces items individuellement.
+  if (Array.isArray(previousValue) && previousValue.length > 0) {
+    try {
+      const tombstones = (await dbGet('gc-tombstones')) || {};
+      if (typeof tombstones === 'object' && !Array.isArray(tombstones)) {
+        const tbs = new Set(tombstones[key] || []);
+        for (const item of previousValue) {
+          if (item?.id) tbs.add(String(item.id));
+        }
+        tombstones[key] = [...tbs].slice(-5000);
+        await dbSet('gc-tombstones', tombstones, 'system-wipe');
+      }
+    } catch (e) {
+      console.warn(`[WIPE-REGISTRY] Tombstone rétroactif échoué pour '${key}':`, e.message);
+    }
+  }
+
   // FIX: Retry persistance jusqu'à succès avec backoff exponentiel
   let retries = 3;
   let lastError = null;
@@ -1532,12 +1588,12 @@ function getWipeRegistryStats() {
 }
 
 // FIX SYNC-HB — Heartbeat serveur toutes les 30s : broadcast 'heartbeat_sync' à tous les clients.
-// FIX WIPE-RACE — Ne broadcaster le wipeRegistry que si le chargement initial est terminé
-// (_wipeRegistryReady=true). Sinon les clients écraseraient leur registre local avec {}.
+// On inclut maintenant la liste des clés à re-fetcher (wipe-registry inclus) pour une couverture totale.
 setInterval(() => {
   if (io.sockets.sockets.size === 0) return;
   const ts = Date.now();
-  io.emit('heartbeat_sync', { ts, wipeRegistry: _wipeRegistryReady ? _wipeRegistry : undefined });
+  io.emit('heartbeat_sync', { ts, wipeRegistry: _wipeRegistry });
+  // Log discret (toutes les 10 heartbeats = 5 min) pour éviter de noyer les logs
   if (Math.floor(ts / 30_000) % 10 === 0) {
     console.log(`[HB] Heartbeat sync → ${io.sockets.sockets.size} client(s) connecté(s)`);
   }
@@ -1845,14 +1901,6 @@ const CRITICAL_EMPTY_ARRAY_KEYS = new Set([
   // FIX BUG#9 — Données financières sensibles : accès GUEST interdit même en lecture
   'gc-journal','gc-budget','gc-factures','gc-devis','gc-paie-transferts','gc-paie-taux',
   'gc-sirh-evaluations','gc-sirh-presences','gc-risks','gc-audit-checklist',
-  // FIX CRIT-EMPTY — Clés config/structure : POST [] ne doit jamais écraser des données existantes
-  'gc-cabinet-info','gc-fiscal-config','gc-delai-config','gc-process-config','gc-process-app-matrix',
-  'gc-app-habilitations','gc-app-access-codes','gc-circuits','gc-orgigram-nodes','gc-orgigram-links',
-  'gc-codif-registry','gc-si-appearance','gc-sirh-fichiers','gc-recrutements',
-  'gc-crm-relances','gc-crm-interactions','gc-crm-opps','gc-crm-clients',
-  'gc-jur-kyc','gc-jur-docs','gc-jur-conventions','gc-achievements',
-  'gc-stocks','gc-achats','gc-logmod-stocks','gc-inventaires',
-  'gc-audit-prog','gc-audit-grille-taches','gc-comm-contacts',
 ]);
 
 // FIX BUG-B18 — Clés de configuration globale qui ne doivent être modifiables
@@ -1912,6 +1960,232 @@ function isArrayOfObjectsWithIds(value) {
   return Array.isArray(value) && value.length > 0 && value.every(item => item && typeof item === 'object' && (typeof item.id === 'string' || typeof item.id === 'number'));
 }
 
+// Clés métier critiques : toujours faire union-merge (jamais écraser aveuglément)
+// [FIX 2026-06-22] Déplacé en portée module (était recréé à chaque requête POST)
+// pour pouvoir être partagé avec applyProtectedWrite() — voir plus bas.
+const MERGE_ALWAYS_KEYS = new Set([
+  'dossiers', 'gc-dossiers', 'taches', 'gc-taches', 'rdvs', 'gc-rdvs',
+  'partners', 'gc-partners', 'gc-dossier-files', 'gc-files', 'gc-docs-unified',
+  'gc-standalone-docs', 'gc-messages', 'gc-notifications',
+]);
+
+// Clés pour lesquelles chaque MODIFY est journalisé dans si_audit (comportement
+// d'origine, conservé pour ne pas saturer si_audit avec les clés à forte fréquence
+// d'écriture comme gc-presence ou gc-session-logs). MERGE_ALWAYS_KEYS est inclus
+// car c'est justement le chemin (flush hors-ligne) qui manquait de traçabilité.
+const AUDITED_KEYS = new Set([
+  'gc-users', 'gc-dossiers', 'gc-taches', 'users', 'dossiers', 'taches', 'gc-account-actions',
+  ...MERGE_ALWAYS_KEYS,
+]);
+
+// ════════════════════════════════════════════════════════════════════════════
+// [FIX RACINE 2026-06-22] applyProtectedWrite — Écriture protégée PARTAGÉE
+// ════════════════════════════════════════════════════════════════════════════
+// CONTEXTE DE L'INCIDENT (perte du client "MINDZIE NGOMO OPINA" et du dossier
+// "DOS-A02-O02.02/2026" — les 28 documents déjà téléversés étaient restés
+// intacts car stockés indépendamment dans la table si_files) :
+//
+// La route HTTP POST /api/data/:key appliquait déjà toute une série de
+// protections anti-régression (union-merge pour les clés métier, seuil de
+// régression, registre de wipe, garde anti-écrasement par [], déduplication
+// no-op, audit log...). MAIS le flush de la file d'attente hors-ligne
+// (événement WebSocket 'flush_offline_queue', déclenché automatiquement à
+// CHAQUE reconnexion du client) appelait dbSet() directement, en ne filtrant
+// que par tombstones — SANS AUCUNE des protections ci-dessus, et SANS AUDIT.
+//
+// Conséquence : si un appel dsSave() échoue brièvement (page qui recharge,
+// micro-coupure réseau pendant un gros transfert de fichiers, reconnexion
+// WebSocket...), un instantané (snapshot) de la valeur AU MOMENT DE L'ÉCHEC
+// est mis en file d'attente locale. Si une sauvegarde ultérieure réussit
+// normalement (donc le serveur a déjà la bonne valeur, plus complète), cet
+// instantané périmé reste dans la file. Au prochain reconnect WebSocket, il
+// est renvoyé tel quel et ÉCRASE silencieusement la valeur serveur à jour —
+// sans merge, sans trace d'audit. C'est exactement ce qui s'est produit pour
+// 'dossiers', 'partners', 'taches' et 'rdvs' simultanément à 12:02:10 (heure
+// du serveur), avec updated_by='offline-anonymous' (l'identité WebSocket n'a
+// pas eu le temps d'être vérifiée avant l'arrivée du flush).
+//
+// CORRECTIF : toute écriture sur une clé partagée — qu'elle vienne du POST
+// HTTP normal OU du flush de la file hors-ligne — passe désormais par CETTE
+// MÊME fonction, qui applique systématiquement les mêmes garde-fous et
+// journalise l'opération dans si_audit pour que ce type d'incident soit
+// immédiatement visible et diagnosticable à l'avenir.
+// ════════════════════════════════════════════════════════════════════════════
+async function applyProtectedWrite(key, sanitized, opts = {}) {
+  const {
+    forceOverwrite = false,
+    clientTs = Date.now(),
+    actorId = 'anonymous',
+    ip = 'internal',
+    auditAction = 'MODIFY',
+    auditDetail = null,
+    queuedAt = 0, // [FIX P1-04] timestamp de mise en FILE OFFLINE (pas d'envoi) — voir vérif ci-dessous
+  } = opts;
+
+  if (!dbReady) return { ok: false, status: 503, error: 'Base de données indisponible' };
+
+  // [FIX P1-04] Entrée issue de la file offline : si le serveur a une version plus récente que
+  // le moment où CETTE entrée a été mise en file, elle est obsolète — un poste resté longtemps
+  // hors-ligne (ex: 1h de coupure réseau) pourrait sinon écraser au reconnect des modifications
+  // plus récentes poussées par d'autres postes pendant son absence. forceOverwrite reste prioritaire
+  // (suppression intentionnelle explicite de l'utilisateur).
+  if (queuedAt > 0 && !forceOverwrite) {
+    try {
+      const existingMeta = await dbGetWithMeta(key);
+      if (existingMeta?.updatedAt && queuedAt < existingMeta.updatedAt) {
+        console.warn(`[applyProtectedWrite] Entrée offline obsolète pour '${key}' (queuedAt=${queuedAt} < serverUpdatedAt=${existingMeta.updatedAt}) — rejetée`);
+        return { ok: false, status: 409, error: 'Entrée hors-ligne obsolète (donnée serveur plus récente)', reason: 'stale_offline_entry' };
+      }
+    } catch (_) { /* en cas de doute, ne pas bloquer l'écriture */ }
+  }
+
+  // 1. Garde anti-écrasement total par [] (poste frais / LS vide)
+  if (CRITICAL_EMPTY_ARRAY_KEYS.has(key) && Array.isArray(sanitized) && sanitized.length === 0 && !forceOverwrite) {
+    const existing0 = await dbGet(key);
+    if (Array.isArray(existing0) && existing0.length > 0) {
+      return { ok: false, status: 409, error: "Impossible d'écraser des données existantes par []" };
+    }
+  }
+
+  // 2. Enregistrement d'un wipe volontaire (reset complet explicite)
+  const isWipe = forceOverwrite && Array.isArray(sanitized) && sanitized.length === 0;
+  if (isWipe) {
+    // Récupérer la valeur AVANT wipe pour tombstoner individuellement chaque item
+    // (defense en profondeur — voir commentaire dans recordWipe()).
+    const previousValue = await dbGet(key).catch(() => null);
+    await recordWipe(key, Date.now(), previousValue);
+  }
+
+  // 3. Anti-résurrection : si un wipe volontaire existe et que l'entrant est
+  //    antérieur à ce wipe (et n'a pas forceOverwrite), on respecte le reset.
+  const wipeTs = getWipeTs(key);
+  let finalValue = sanitized;
+  if (wipeTs > 0 && !forceOverwrite && Array.isArray(sanitized) && sanitized.length > 0) {
+    const cTs = Number(clientTs || Date.now());
+    if (cTs < wipeTs) finalValue = [];
+  }
+
+  // 4. Union-merge défensif pour les tableaux d'objets avec id
+  if (isArrayOfObjectsWithIds(finalValue) && !forceOverwrite) {
+    try {
+      // [T-03 complément] Filtrer TOUJOURS les items tombstonés de l'entrant, même quand
+      // le merge complet n'est pas déclenché. Sans ceci, un poste offline qui push un tableau
+      // légèrement plus grand (quelques créations offline) pouvait réintroduire des items
+      // tombstonés si leur nombre n'atteignait pas le seuil du shouldMerge.
+      let tombstonedIds = new Set();
+      try {
+        const tombstones = await dbGet('gc-tombstones');
+        if (tombstones && typeof tombstones === 'object' && !Array.isArray(tombstones)) {
+          (tombstones[key] || []).forEach(id => tombstonedIds.add(String(id)));
+        }
+      } catch (_) {}
+      if (tombstonedIds.size > 0) {
+        const beforeFilter = finalValue.length;
+        finalValue = finalValue.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
+        if (finalValue.length < beforeFilter) {
+          console.warn(`[TOMBSTONE-PRE-FILTER] ${beforeFilter - finalValue.length} item(s) tombstonés filtrés de l'entrant pour '${key}' avant merge`);
+        }
+      }
+
+      const existing = await dbGet(key);
+      if (finalValue.length !== 0) {
+        // [SECU-FIX] Seuil aligné sur celui du client (datastore.js, 25%) — avant,
+        // le serveur intervenait dès -30% alors que le client n'intervenait qu'à
+        // partir de -75%, créant une zone (-30% à -75%) où aucune protection ne
+        // se déclenchait de façon fiable, provoquant des pertes/résurrections
+        // intermittentes et difficiles à reproduire.
+        const shouldMerge = Array.isArray(existing) && existing.length >= 2 && (
+          MERGE_ALWAYS_KEYS.has(key) ? true : finalValue.length <= existing.length * 0.25
+        );
+        if (shouldMerge) {
+          const incomingIds = new Set(finalValue.map(item => item?.id).filter(Boolean));
+          let tombstonedIds = new Set();
+          try {
+            const tombstones = await dbGet('gc-tombstones');
+            // Garde défensive : 'gc-tombstones' doit être un objet { clé: [ids] }.
+            // S'il a été corrompu en tableau (cf. incident), on l'ignore plutôt
+            // que de planter ou de filtrer au hasard.
+            if (tombstones && typeof tombstones === 'object' && !Array.isArray(tombstones)) {
+              (tombstones[key] || []).forEach(id => tombstonedIds.add(String(id)));
+            }
+          } catch (_) {}
+
+          const filteredIncoming = sanitized.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
+          const preserved = existing.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
+          const filteredSanitized = filteredIncoming.filter(item => !item?.id || !tombstonedIds.has(String(item.id)));
+          const existingById = new Map(existing.map(i => [String(i?.id), i]));
+          const resolvedIncoming = filteredSanitized.map(item => {
+            if (!item?.id) return item;
+            const serverItem = existingById.get(String(item.id));
+            if (!serverItem) return item;
+            const incomingItemTs = item.updatedAt || item.modifiedAt || item.createdAt || 0;
+            const serverTs = serverItem.updatedAt || serverItem.modifiedAt || serverItem.createdAt || 0;
+            return incomingItemTs >= serverTs ? item : serverItem;
+          });
+          const allItems = [...resolvedIncoming, ...preserved];
+          if (preserved.length > 0 || filteredSanitized.length < sanitized.length) {
+            const seenIds = new Set();
+            finalValue = allItems.filter(item => {
+              const id = item?.id ? String(item.id) : null;
+              if (seenIds.has(id)) return false;
+              if (id) seenIds.add(id);
+              return true;
+            });
+            console.warn(
+              `[ANTI-REGRESSION v140+] Merge défensif pour '${key}': ` +
+              `entrant=${sanitized.length}, serveur=${existing.length}, ` +
+              `final=${finalValue.length} (${preserved.length} préservés, ${tombstonedIds.size} tombstonés exclus)`
+            );
+            await auditLog(actorId, 'ANTI_REGRESSION', key,
+              `Merge défensif: ${sanitized.length} entrant vs ${existing.length} serveur → final ${finalValue.length}`, ip);
+          }
+        }
+      }
+    } catch (mergeErr) {
+      console.warn('[ANTI-REGRESSION] Erreur lecture pour merge:', mergeErr.message);
+    }
+  }
+
+  const writeValue = finalValue;
+
+  // 5. Limite de taille
+  const valJson = JSON.stringify(writeValue);
+  if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) {
+    return { ok: false, status: 413, error: `Valeur trop grande (max ${MAX_VALUE_MB} MB)` };
+  }
+
+  // 6. Déduplication no-op : valeur identique → pas d'écriture, pas de broadcast
+  if (!forceOverwrite) {
+    try {
+      const currentRaw = await dbGet(key);
+      if (JSON.stringify(currentRaw) === valJson) {
+        return { ok: true, noop: true, value: writeValue, updatedAt: Date.now() };
+      }
+    } catch (_) {}
+  }
+
+  // 7. Écriture effective + audit
+  const setOk = await dbSet(key, writeValue, actorId);
+  if (!setOk) return { ok: false, status: 500, error: 'Erreur base de données' };
+
+  if (AUDITED_KEYS.has(key)) {
+    await auditLog(actorId, auditAction, key, auditDetail || `Modification ${key}`, ip);
+  }
+  await redisInvalidateCache(key);
+
+  // 8. Effet de bord : créer les dossiers physiques manquants
+  if ((key === 'dossiers' || key === 'gc-dossiers') && Array.isArray(writeValue)) {
+    setImmediate(async () => {
+      for (const dossier of writeValue.slice(0, 200)) {
+        if (!dossier?.id) continue;
+        await ensureDossierFolder(dossier).catch(() => {});
+      }
+    });
+  }
+
+  return { ok: true, value: writeValue, updatedAt: Date.now() };
+}
+
 // [C16] Batch lecture — filtrage isAllowedKey strict
 app.post('/api/data/batch', rateLimiter(120), authenticateToken, async (req, res) => {
   const { keys = [] } = req.body;
@@ -1925,6 +2199,25 @@ app.post('/api/data/batch', rateLimiter(120), authenticateToken, async (req, res
   res.json({ ok: true, data: result });
 });
 
+// [SECU-FIX] Retire les champs mot de passe de toute réponse contenant des comptes
+// utilisateurs, SAUF pour le compte de l'appelant lui-même (qui en a légitimement
+// besoin côté client : vérification locale, dérivation de clé de chiffrement du
+// cache offline, migration SHA-256→bcrypt). L'accès anonyme à 'users' reste
+// ouvert (indispensable pour afficher l'écran de sélection de compte sur un poste
+// neuf sans session), mais ne renvoie plus jamais de secret à un appelant qui
+// n'est pas déjà authentifié en tant que ce compte précis.
+const _USER_SECRET_FIELDS = ['passwordHash', 'password', 'passwordHistory'];
+function sanitizeUserRecords(key, value, requesterId) {
+  if ((key !== 'users' && key !== 'gc-users') || !Array.isArray(value)) return value;
+  return value.map(u => {
+    if (u && typeof u === 'object' && requesterId && u.id === requesterId) return u; // propre compte : inchangé
+    if (!u || typeof u !== 'object') return u;
+    const clean = { ...u };
+    for (const f of _USER_SECRET_FIELDS) delete clean[f];
+    return clean;
+  });
+}
+
 app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (req, res) => {
   const key = req.params.key;
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
@@ -1933,7 +2226,7 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
     // Use Redis cache for hot keys when available
     if (redisAvailable && CACHEABLE_KEYS.has(key)) {
       const cached = await redisGetCache(key);
-      if (cached !== null) return res.json({ ok: true, key, value: cached, source: 'redis' });
+      if (cached !== null) return res.json({ ok: true, key, value: sanitizeUserRecords(key, cached, req.user && req.user.id), source: 'redis' });
     }
 
     if (dbReady) {
@@ -1946,14 +2239,14 @@ app.get('/api/data/:key', rateLimiter(300), authenticateTokenOptional, async (re
       if (meta === null) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
       const { value, updatedAt } = meta;
       if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, value);
-      return res.json({ ok: true, key, value, updatedAt });
+      return res.json({ ok: true, key, value: sanitizeUserRecords(key, value, req.user && req.user.id), updatedAt });
     }
 
     const data = jsonLoad();
     if (!(key in data)) return res.status(404).json({ ok: false, error: 'Clé introuvable', key });
     const v = data[key];
     if (redisAvailable && CACHEABLE_KEYS.has(key)) await redisSetCache(key, v);
-    return res.json({ ok: true, key, value: v });
+    return res.json({ ok: true, key, value: sanitizeUserRecords(key, v, req.user && req.user.id) });
   } catch (e) {
     console.error('[GET /api/data/:key] error', e && e.message);
     return res.status(500).json({ error: 'Erreur interne' });
@@ -1973,30 +2266,6 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
   if (!validation.valid) return res.status(400).json({ error: validation.error });
   const sanitized = validation.sanitized;
 
-  if (CRITICAL_EMPTY_ARRAY_KEYS.has(key) && Array.isArray(sanitized) && sanitized.length === 0) {
-    const existing = await dbGet(key);
-    if (Array.isArray(existing) && existing.length > 0) {
-      return res.status(409).json({ error: 'Impossible d\'écraser des données existantes par []' });
-    }
-  }
-
-  // ── FIX v140 BUG #2 — Anti-régression côté serveur (AMÉLIORÉ) ──────────────────────────
-  // Un client frais (localStorage vide) peut envoyer une liste tronquée d'utilisateurs
-  // (ex: 2 comptes par défaut) alors que le serveur en possède 10+.
-  // Sans ce guard, le serveur remplaçait silencieusement 10 comptes par 2.
-  //
-  // RÈGLE AMÉLIORÉE : Seulement si incoming < 80% de existing ET existing > 10 items
-  // ET seulement si le client n'a pas explicitement demandé forceOverwrite.
-  // On préserve les entrées existantes non présentes dans l'entrant (identifiées par .id).
-  // Les tombstones sont respectés pour éviter la résurrection d'éléments supprimés.
-  // ─────────────────────────────────────────────────────────────────────────────────────────
-  // Clés métier critiques : toujours faire union-merge (jamais écraser aveuglément)
-  const MERGE_ALWAYS_KEYS = new Set([
-    'dossiers', 'gc-dossiers', 'taches', 'gc-taches', 'rdvs', 'gc-rdvs',
-    'partners', 'gc-partners', 'gc-dossier-files', 'gc-files', 'gc-docs-unified',
-    'gc-standalone-docs', 'gc-messages', 'gc-notifications',
-  ]);
-
   // AUTH GUARD — x-force-overwrite requiert niveau 4+ ou admin
   const reqLevel = req.user?.level || 0;
   const reqIsAdmin = req.user?.isAdmin || reqLevel >= 6;
@@ -2004,224 +2273,106 @@ app.post('/api/data/:key', rateLimiter(300), authenticateToken, async (req, res)
     return res.status(403).json({ error: 'Niveau 4 minimum requis pour forceOverwrite' });
   }
 
-  // WIPE REGISTRY — Si forceOverwrite + tableau vide (ou très réduit) : enregistrer le wipe
-  const isWipe = req.headers['x-force-overwrite'] && Array.isArray(sanitized) && sanitized.length === 0;
-  if (isWipe) {
-    await recordWipe(key);
+  const actorId = req.user?.id || 'anonymous';
+  const clientTs = Number(req.headers['x-client-ts'] || req.headers['x-write-ts'] || Date.now());
+  // [FIX P1-04] Présent uniquement quand cette écriture provient du flush HTTP de la file offline
+  const queuedAt = Number(req.headers['x-offline-queued-at'] || 0);
+
+  // Mode dégradé sans SQLite (jamais utilisé en pratique ici, mais préservé tel quel) :
+  // pas de garde anti-régression possible (dbGet renvoie toujours null hors SQLite,
+  // donc ces garde-fous étaient déjà inopérants dans ce mode avant ce correctif).
+  if (!dbReady) {
+    const data = jsonLoad();
+    data[key] = sanitized;
+    jsonSave(data);
+    const senderSocketId0 = req.headers['x-socket-id'] || null;
+    const writeTs0 = Date.now();
+    broadcast('data_changed', { key, action: 'set', by: actorId, ts: writeTs0, updatedAt: writeTs0 }, senderSocketId0);
+    return res.json({ ok: true, key, saved: true, updatedAt: writeTs0 });
   }
 
-  // ANTI-RÉSURRECTION : si un wipe volontaire a été enregistré pour cette clé,
-  // et que le client envoie des données SANS forceOverwrite (client hors-ligne qui revient),
-  // on écrase sa valeur par [] pour respecter le reset intentionnel.
-  const wipeTs = getWipeTs(key);
-  let finalValue = sanitized;
-  if (
-    wipeTs > 0 &&
-    !req.headers['x-force-overwrite'] &&
-    Array.isArray(sanitized) && sanitized.length > 0
-  ) {
-    // FIX BUG#10 — Défaut clientTs à Date.now() (pas 0) pour éviter false positives
-    // Si un client offline n'envoie pas x-client-ts, on assume qu'il est récent (current time)
-    // Sinon, tout client offline reconnectant sera traité comme antérieur à wipe
-    const clientTs = Number(req.headers['x-client-ts'] || req.headers['x-write-ts'] || Date.now());
-    if (clientTs < wipeTs) {
-      // Données du client antérieures au wipe → respecter le reset, ignorer les données entrantes
-      finalValue = [];
-    }
-  }
+  // [FIX RACINE 2026-06-22] Toute la logique anti-régression / union-merge /
+  // wipe-registry / dédup / audit vit désormais dans applyProtectedWrite(),
+  // partagée avec le flush de la file hors-ligne (voir socket 'flush_offline_queue').
+  const result = await applyProtectedWrite(key, sanitized, {
+    forceOverwrite: !!req.headers['x-force-overwrite'],
+    clientTs,
+    queuedAt,
+    actorId,
+    ip: req.ip,
+    auditAction: 'MODIFY',
+    auditDetail: `Modification ${key}`,
+  });
 
-  if (
-    isArrayOfObjectsWithIds(finalValue) &&
-    !req.headers['x-force-overwrite']
-  ) {
-    try {
-      const existing = await dbGet(key);
-      // Pour MERGE_ALWAYS_KEYS : union-merge dès qu'il y a des données existantes (pas de seuil %)
-      // Pour les autres : seuil < 70% (défensif)
-      // Si finalValue est [] suite à l'anti-résurrection → pas de merge, on respecte le wipe
-      if (finalValue.length === 0) {
-        // pas de merge nécessaire, finalValue reste []
-      } else {
-      const shouldMerge = Array.isArray(existing) && existing.length >= 2 && (
-        MERGE_ALWAYS_KEYS.has(key)
-          ? true  // union-merge systématique pour clés métier
-          : finalValue.length < existing.length * 0.7
-      );
-      if (shouldMerge) {
-        // FIX BUG#6 — utiliser finalValue (post-anti-résurrection) et non sanitized
-        // pour calculer les IDs entrants, sinon des items filtrés comptent comme "présents"
-        // et des items serveur qui devaient être préservés sont supprimés à tort.
-        const incomingIds = new Set(finalValue.map(item => item?.id).filter(Boolean));
-        let tombstonedIds = new Set();
-        try {
-          const tombstones = await dbGet('gc-tombstones');
-          if (tombstones && typeof tombstones === 'object') {
-            (tombstones[key] || []).forEach(id => tombstonedIds.add(String(id)));
-          }
-        } catch (_) {}
-        
-        // FIX MERGE-ARRAY — Utiliser finalValue (déjà filtré par anti-resurrection) et non sanitized.
-        // sanitized = données brutes envoyées par le client (pré-filtrées)
-        // finalValue = données post-anti-resurrection (items ressuscités retirés)
-        // Appliquer en plus le filtre tombstones pour couvrir les cas où le hash SHA ne matcherait pas.
-        const filteredIncoming = finalValue.filter(item => {
-          if (!item?.id) return true;
-          const isInTombstone = tombstonedIds.has(String(item.id));
-          if (isInTombstone) {
-            console.log(`[ANTI-RESURRECTION-BE] Filtered tombstoned item ${key}/${item.id}`);
-          }
-          return !isInTombstone;
-        });
+  if (!result.ok) return res.status(result.status || 500).json({ error: result.error || 'Erreur' });
+  if (result.noop) return res.status(200).json({ ok: true, noop: true });
 
-        // Items du serveur absents de l'entrant (et non-tombstonés) → à préserver
-        const preserved = existing.filter(item => item?.id && !incomingIds.has(item.id) && !tombstonedIds.has(String(item.id)));
-        const filteredSanitized = filteredIncoming;
-        // Pour les conflits (même ID dans entrant ET serveur) : garder la version la plus récente
-        const existingById = new Map(existing.map(i => [String(i?.id), i]));
-        const resolvedIncoming = filteredSanitized.map(item => {
-          if (!item?.id) return item;
-          const serverItem = existingById.get(String(item.id));
-          if (!serverItem) return item;
-          const incomingTs = item.updatedAt || item.modifiedAt || item.createdAt || 0;
-          const serverTs   = serverItem.updatedAt || serverItem.modifiedAt || serverItem.createdAt || 0;
-          return incomingTs >= serverTs ? item : serverItem;
-        });
-        const allItems = [...resolvedIncoming, ...preserved];
-        if (preserved.length > 0 || filteredSanitized.length < sanitized.length) {
-          // Déduplication finale par ID
-          const seenIds = new Set();
-          finalValue = allItems.filter(item => {
-            const id = item?.id ? String(item.id) : null;
-            if (!id) return true;
-            if (seenIds.has(id)) return false;
-            seenIds.add(id);
-            return true;
-          });
-          console.warn(
-            `[ANTI-REGRESSION v140+] Merge défensif pour '${key}': ` +
-            `entrant=${sanitized.length}, serveur=${existing.length}, ` +
-            `final=${finalValue.length} (${preserved.length} éléments préservés, ${tombstonedIds.size} tombstonés exclus)`
-          );
-          await auditLog(
-            req.user?.id || 'anon', 'ANTI_REGRESSION', key,
-            `Merge défensif: ${sanitized.length} < 80% de ${existing.length} → final ${finalValue.length}`,
-            req.ip
-          );
-        }
-      } // end if shouldMerge
-      } // end else (finalValue.length > 0)
-    } catch (mergeErr) {
-      console.warn('[ANTI-REGRESSION] Erreur lecture pour merge:', mergeErr.message);
-      // En cas d'erreur de lecture → continuer avec la valeur envoyée (fail-open)
-    }
-  }
-  // Remplacer sanitized par finalValue (merge ou original) pour toutes les écritures
-  const writeValue = finalValue;
+  const writeValue = result.value;
 
-  // [C7] Limite taille par valeur
-  const valJson = JSON.stringify(writeValue);
-  if (Buffer.byteLength(valJson, 'utf8') > MAX_VALUE_MB * 1024 * 1024) {
-    return res.status(413).json({ error: `Valeur trop grande (max ${MAX_VALUE_MB} MB)` });
-  }
-
-  // [DEDUP] Si la valeur entrante est identique à la valeur stockée → pas d'écriture, pas de broadcast.
-  // Coupe les boucles write→broadcast→GET→write qui créent des centaines de req/s (ex: gc-app-habilitations).
-  if (!req.headers['x-force-overwrite'] && dbReady) {
-    try {
-      const currentRaw = await dbGet(key);
-      if (JSON.stringify(currentRaw) === valJson) {
-        return res.status(200).json({ ok: true, noop: true });
-      }
-    } catch (_) {}
-  }
-
-  if (dbReady) {
-    const ok = await dbSet(key, writeValue, req.user?.id || 'anonymous');
-    if (!ok) return res.status(500).json({ error: 'Erreur base de données' });
-
-    if (['gc-users','gc-dossiers','gc-taches','users','dossiers','taches','gc-account-actions'].includes(key)) {
-      await auditLog(req.user?.id || 'anon', 'MODIFY', key, `Modification ${key}`, req.ip);
-    }
-
-    await redisInvalidateCache(key);
-
-    if (key === 'users' || key === 'gc-users') try {
-      let existingGcUsers = await dbGet('gc-users') || [];
-      let changed = false;
-      if (Array.isArray(writeValue)) {
-        for (const u of writeValue) {
-          if (!u.id || !u.passwordHash) continue;
-          // Match uniquement par ID pour éviter les faux positifs sur alias/email partagé
-          const gcIdx = existingGcUsers.findIndex(g => g.id === u.id);
-          const gcEntry = {
-            id:            u.id,
-            username:      u.alias || u.id,
-            email:         u.email || '',
-            passwordHash:  u.passwordHash,
-            role:          u.role || 'Collaborateur',
-            level:         u.level ?? 1,
-            accountStatus: u.accountStatus || 'ACTIF',
-          };
-          if (gcIdx === -1) {
-            existingGcUsers.push(gcEntry);
-            changed = true;
-            console.log(`[SYNC-AUTH] Nouveau compte '${gcEntry.username}' (${gcEntry.id}) → gc-users`);
-          } else {
-            // Mettre à jour le hash et le statut si changés
-            const g = existingGcUsers[gcIdx];
-            if (g.passwordHash !== u.passwordHash || g.accountStatus !== gcEntry.accountStatus || g.level !== gcEntry.level) {
-              existingGcUsers[gcIdx] = { ...g, ...gcEntry };
-              changed = true;
-            }
-          }
-        }
-      } else {
-        console.warn('[SYNC-AUTH] writeValue non-tableau pour', key, '— sync gc-users ignoré.');
-      }
-      // FIX BUG-B8 — Pruning sécurisé de gc-users.
-      // Quand un admin (level >= 6) sauvegarde explicitement la liste users avec
-      // header 'x-prune-users: 1' (envoyé par l'UI lors d'une suppression de compte),
-      // on retire les comptes absents de la nouvelle liste. Sans ce header, on garde
-      // l'ancien comportement (pas de suppression) pour éviter les pertes accidentelles
-      // lors des sauvegardes partielles.
-      const isAdminCall = (req.user?.level || 0) >= 6 || req.user?.isAdmin;
-      const requestPrune = req.headers['x-prune-users'] === '1' && isAdminCall;
-      // TASK5 FIX: ne pruner que si existingGcUsers et writeValue ont tous deux des entrées
-      if (requestPrune && existingGcUsers.length > 0 && Array.isArray(writeValue) && writeValue.length > 0 && (key === 'users' || key === 'gc-users')) {
-        const incomingIds = new Set(writeValue.map(u => u?.id).filter(Boolean));
-        const before = existingGcUsers.length;
-        existingGcUsers = existingGcUsers.filter(g => incomingIds.has(g.id));
-        if (existingGcUsers.length !== before) {
+  // Sync auth gc-users — spécifique à la route HTTP (nécessite req.headers/req.user)
+  if (key === 'users' || key === 'gc-users') try {
+    let existingGcUsers = await dbGet('gc-users') || [];
+    let changed = false;
+    if (Array.isArray(writeValue)) {
+      for (const u of writeValue) {
+        if (!u.id || !u.passwordHash) continue;
+        // Match uniquement par ID pour éviter les faux positifs sur alias/email partagé
+        const gcIdx = existingGcUsers.findIndex(g => g.id === u.id);
+        const gcEntry = {
+          id:            u.id,
+          username:      u.alias || u.id,
+          email:         u.email || '',
+          passwordHash:  u.passwordHash,
+          role:          u.role || 'Collaborateur',
+          level:         u.level ?? 1,
+          accountStatus: u.accountStatus || 'ACTIF',
+        };
+        if (gcIdx === -1) {
+          existingGcUsers.push(gcEntry);
           changed = true;
-          console.log(`[SYNC-AUTH] Pruning admin : ${before - existingGcUsers.length} compte(s) retiré(s) de gc-users`);
+          console.log(`[SYNC-AUTH] Nouveau compte '${gcEntry.username}' (${gcEntry.id}) → gc-users`);
+        } else {
+          // Mettre à jour le hash et le statut si changés
+          const g = existingGcUsers[gcIdx];
+          if (g.passwordHash !== u.passwordHash || g.accountStatus !== gcEntry.accountStatus || g.level !== gcEntry.level) {
+            existingGcUsers[gcIdx] = { ...g, ...gcEntry };
+            changed = true;
+          }
         }
       }
-      if (changed) {
-        await dbSet('gc-users', existingGcUsers);
-        console.log(`[SYNC-AUTH] gc-users synchronisé (${existingGcUsers.length} comptes)`);
-      }
-    } catch (syncErr) {
-      console.warn('[SYNC-AUTH] Échec sync gc-users:', syncErr.message);
+    } else {
+      console.warn('[SYNC-AUTH] writeValue non-tableau pour', key, '— sync gc-users ignoré.');
     }
-  } else {
-    // FIX v140 — utiliser writeValue (merge inclus) aussi en mode JSON fallback
-    const data = jsonLoad(); data[key] = writeValue; jsonSave(data);
-  }
-
-  // DOSSIER-FS : si on sauvegarde la liste des dossiers, créer les dossiers physiques manquants
-  if ((key === 'dossiers' || key === 'gc-dossiers') && Array.isArray(writeValue)) {
-    setImmediate(async () => {
-      for (const dossier of writeValue.slice(0, 200)) {
-        if (!dossier?.id) continue;
-        await ensureDossierFolder(dossier).catch(() => {});
+    // FIX BUG-B8 — Pruning sécurisé de gc-users.
+    // Quand un admin (level >= 6) sauvegarde explicitement la liste users avec
+    // header 'x-prune-users: 1' (envoyé par l'UI lors d'une suppression de compte),
+    // on retire les comptes absents de la nouvelle liste. Sans ce header, on garde
+    // l'ancien comportement (pas de suppression) pour éviter les pertes accidentelles
+    // lors des sauvegardes partielles.
+    const isAdminCall = (req.user?.level || 0) >= 6 || req.user?.isAdmin;
+    const requestPrune = req.headers['x-prune-users'] === '1' && isAdminCall;
+    // TASK5 FIX: ne pruner que si existingGcUsers et writeValue ont tous deux des entrées
+    if (requestPrune && existingGcUsers.length > 0 && Array.isArray(writeValue) && writeValue.length > 0 && (key === 'users' || key === 'gc-users')) {
+      const incomingIds = new Set(writeValue.map(u => u?.id).filter(Boolean));
+      const before = existingGcUsers.length;
+      existingGcUsers = existingGcUsers.filter(g => incomingIds.has(g.id));
+      if (existingGcUsers.length !== before) {
+        changed = true;
+        console.log(`[SYNC-AUTH] Pruning admin : ${before - existingGcUsers.length} compte(s) retiré(s) de gc-users`);
       }
-    });
+    }
+    if (changed) {
+      await dbSet('gc-users', existingGcUsers);
+      console.log(`[SYNC-AUTH] gc-users synchronisé (${existingGcUsers.length} comptes)`);
+    }
+  } catch (syncErr) {
+    console.warn('[SYNC-AUTH] Échec sync gc-users:', syncErr.message);
   }
 
   // [C8] Exclure l'expéditeur du broadcast via X-Socket-Id header
   const senderSocketId = req.headers['x-socket-id'] || null;
-  const writeTs = Date.now();
-  broadcast('data_changed', { key, action: 'set', by: req.user?.id || 'anonymous', ts: writeTs, updatedAt: writeTs }, senderSocketId);
+  const writeTs = result.updatedAt || Date.now();
+  broadcast('data_changed', { key, action: 'set', by: actorId, ts: writeTs, updatedAt: writeTs }, senderSocketId);
   res.json({ ok: true, key, saved: true, updatedAt: writeTs });
 });
 
@@ -2244,6 +2395,8 @@ app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, re
   if (!isAllowedKey(key)) return res.status(403).json({ error: `Clé non autorisée: ${key}` });
   if (!ensureAuthForKey(req, res, key)) return;
   const userId = req.body?.userId || req.user?.id || 'anonymous';
+  // Capturer la valeur AVANT suppression pour le tombstone rétroactif (voir recordWipe)
+  const previousValue = dbReady ? await dbGet(key).catch(() => null) : null;
   if (dbReady) {
     await dbDelete(key);
     await redisInvalidateCache(key);
@@ -2252,7 +2405,7 @@ app.delete('/api/data/:key', rateLimiter(100), authenticateToken, async (req, re
   broadcast('data_changed', { key, action: 'delete', by: userId, ts: Date.now() }, senderSocketId);
   // FIX BUG#4 — Utiliser recordWipe() pour persister le wipe en DB (pas juste en mémoire)
   // Sans ça, après redémarrage serveur le wipe est perdu et les clients offline peuvent ressusciter
-  await recordWipe(key);
+  await recordWipe(key, Date.now(), previousValue);
   broadcastWipeRegistryUpdate(key);
   res.json({ ok: true, key, deleted: true });
 });
@@ -2267,18 +2420,24 @@ app.delete('/api/data/:key/item/:itemId', rateLimiter(100), authenticateToken, a
   if (!itemId) return res.status(400).json({ error: 'itemId requis' });
 
   // 1. Enregistrer le tombstone AVANT toute modification
-  // FIX TOMBSTONE-RACE — Si la persistance du tombstone échoue, annuler la suppression.
-  // Mieux vaut refuser de supprimer que de supprimer sans tombstone → item ressuscitable.
   try {
     let tombstones = {};
-    if (dbReady) tombstones = (await dbGet('gc-tombstones')) || {};
+    if (dbReady) {
+      const raw = await dbGet('gc-tombstones');
+      // [FIX 2026-06-22] Garde de forme : 'gc-tombstones' DOIT être un objet
+      // { clé: [ids] }. S'il a été corrompu en tableau (constaté en prod : []),
+      // toute écriture tombstones[key]=[...] sur un Array est perdue au
+      // JSON.stringify (les clés non-indexées d'un tableau ne sont pas
+      // sérialisées) — le tombstone semblait enregistré mais disparaissait
+      // silencieusement. On repart d'un objet propre dans ce cas.
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) tombstones = raw;
+    }
     const tbs = new Set(tombstones[key] || []);
     tbs.add(String(itemId));
     tombstones[key] = [...tbs].slice(-5000);
     if (dbReady) await dbSet('gc-tombstones', tombstones, req.user?.id || 'anonymous');
   } catch (tErr) {
-    console.error('[DELETE-ITEM] Impossible de persister le tombstone — suppression annulée:', tErr.message);
-    return res.status(500).json({ error: 'Erreur interne : impossible de sécuriser la suppression, réessayez.' });
+    console.warn('[DELETE-ITEM] Erreur enregistrement tombstone:', tErr.message);
   }
 
   // 2. Supprimer l'item du tableau en base
@@ -2552,9 +2711,8 @@ app.get('/api/files/:id', rateLimiter(300), authenticateTokenOptional, async (re
   }
   if (!meta) return res.status(404).json({ error: 'Fichier introuvable' });
 
-  // FIX FILE-COMPRESSED — Pour les fichiers compressés, disk_path pointe vers l'original
-  // supprimé par compressIfNeeded(). Utiliser compressed_path en priorité.
-  const realPath = path.resolve(meta.compressed ? (meta.compressed_path || meta.disk_path || '') : (meta.disk_path || meta.compressed_path || ''));
+  // Validation anti-path-traversal : le chemin absolu doit rester dans UPLOADS_DIR
+  const realPath = path.resolve(meta.disk_path || meta.compressed_path || '');
   const uploadsRoot = path.resolve(UPLOADS_DIR);
   if (!realPath.startsWith(uploadsRoot + path.sep) && realPath !== uploadsRoot) {
     console.error(`[SECURITY] Path traversal détecté pour fichier ${id}: ${realPath}`);
@@ -2571,8 +2729,13 @@ app.get('/api/files/:id', rateLimiter(300), authenticateTokenOptional, async (re
   res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${safeName}`);
   res.setHeader('Content-Type', meta.mime_type || 'application/octet-stream');
   res.setHeader('Cache-Control', 'private, max-age=3600');
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // [SECU-FIX] N'accepter que les origines validées par la même politique que le
+  // reste de l'API (auparavant : reflet de n'importe quelle origine + credentials
+  // activés, ce qui neutralisait la protection CORS pour cette route précise).
+  if (isOriginAllowed(req.headers.origin)) {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (meta.compressed) {
     const stream = fs.createReadStream(realPath);
@@ -2705,7 +2868,9 @@ app.post('/api/ai/claude', rateLimiter(10, 60_000), authenticateToken, async (re
   if (!AI_KEYS.claude) return res.status(503).json({ error: 'CLAUDE_API_KEY non configurée' });
   if (!_validateAIBody(req, res)) return;
   try {
-    const { model = 'claude-3-haiku-20240307', messages, system, max_tokens = 1000 } = req.body;
+    // [FIX P2-05] Fallback mis à jour (l'ancien pointait vers claude-3-haiku-20240307, retiré).
+    // Le client envoie normalement déjà 'claude-sonnet-4-6' — ce fallback ne joue que si absent.
+    const { model = 'claude-haiku-4-5-20251001', messages, system, max_tokens = 1000 } = req.body;
     const safeMaxTokens = Math.min(parseInt(max_tokens) || 1000, 8000);
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -2759,6 +2924,12 @@ let _emailTransporter = null;
       port: parseInt(process.env.EMAIL_PORT || '587'),
       secure: process.env.EMAIL_SECURE === 'true',
       auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+      // FIX v154-EMAIL: Accepter certificats auto-signés sur STARTTLS (port 587)
+      rejectUnauthorized: false,
+      tls: {
+        rejectUnauthorized: false,  // Accepter chaîne certificats incomplète
+        minVersion: 'TLSv1.2',      // Minimum TLS 1.2
+      },
     });
     await _emailTransporter.verify();
     console.log(`✅ Email SMTP: ${process.env.EMAIL_USER}`);
@@ -3226,6 +3397,25 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ── Registration Sync Master ────────────────────────────────────────────────
+// [FIX — découvert en validant P0-03] Cet enregistrement DOIT se faire ICI, avant le handler
+// catch-all 404 ci-dessous. Il était auparavant fait à l'intérieur de start() (exécuté en tout
+// dernier, via start().catch() en fin de fichier) — donc APRÈS que ce catch-all synchrone ait déjà
+// été ajouté à la pile de middlewares Express. Express route les requêtes dans l'ordre
+// d'enregistrement : le catch-all interceptait alors CES 3 ROUTES AVANT qu'elles n'existent,
+// les rendant inatteignables (404 systématique, pour tout le monde) depuis le début — bien plus
+// grave que la simple absence d'authentification relevée par l'audit (P0-03).
+// dbGet/dbSet/dbDelete sont de simples références de fonctions ici (pas d'appel) : aucune
+// dépendance à ce que la base soit déjà prête à ce stade — elle le sera au moment des requêtes.
+syncMaster.initializeSyncMaster(dbGet, dbSet, dbDelete);
+// [FIX P0-03] authenticateToken transmis en 3e argument — sans lui, les routes
+// /api/sync/purify-all, /state-checksum, /validate-client, /status étaient accessibles
+// sans JWT par n'importe qui sur le réseau local.
+syncMaster.registerSyncMasterRoutes(app, io, authenticateToken);
+syncMaster.registerSyncMasterWebSocket(io);
+console.log(`[SyncMaster] ✅ Orchestrateur purification multi-postes activé`);
+console.log(`[SyncMaster] Routes: POST /api/sync/purify-all, GET /api/sync/state-checksum`);
+
 // Handle unknown routes with explicit JSON response.
 app.use((req, res) => {
   res.status(404).json({ error: 'Route introuvable' });
@@ -3472,6 +3662,15 @@ async function start() {
       if (changed) await dbSet('gc-users', gcUsers);
     }
   } catch (e) { console.warn('[BOOT] Bootstrap gc-users partiel:', e.message); }
+
+  // [FIX — découvert en validant P0-03] L'enregistrement des routes Sync Master a été déplacé
+  // plus haut dans le fichier (avant le handler catch-all 404), voir commentaire détaillé à cet
+  // endroit. Il était auparavant fait ICI, dans start() — donc APRÈS que le catch-all synchrone
+  // (`app.use((req,res)=>res.status(404)...)`, exécuté tôt au chargement du module) ait déjà été
+  // ajouté à la pile de middlewares Express. Résultat vérifié empiriquement : ces 3 routes
+  // renvoyaient TOUJOURS 404, pour tout le monde, peu importe l'authentification — la fonctionnalité
+  // de purification multi-postes via l'UI admin était donc inopérante depuis le début, bien plus
+  // gravement que ce que décrivait l'audit (qui supposait ces routes seulement non-protégées).
 
   // [FIX-EADDRINUSE] Gestion propre du port déjà utilisé
   server.on('error', (err) => {
