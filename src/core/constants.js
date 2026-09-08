@@ -288,7 +288,7 @@ const gcCopy = async (text, onSuccess, onError) => {
 const generateAccessCode = () => {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const raw = Array.from({length: 8}, () => chars[Math.floor(Math.random()*chars.length)]).join("");
-  return raw.slice(0, 4) + "-" + raw.slice(4);
+  return raw?.slice(0, 4) + "-" + raw?.slice(4);
 };
 
 // Convert a base64 dataUrl to a Blob (for opening PDFs in new tab)
@@ -459,7 +459,7 @@ const _gcFallbackHash = (password) => {
   }
   const part = (n) => (n >>> 0).toString(16).padStart(8, "0");
   const base = part(h1) + part(h2) + part(h1 ^ h2) + part((h1 + h2) >>> 0);
-  return (base + base).slice(0, 64);
+  return (base + base)?.slice(0, 64);
 };
 
 // Helper interne : calcule le hash SHA-256 directement, sans fallback
@@ -519,7 +519,7 @@ export const gcVerifyAdmin = async (uid, pwd, storedHash) => {
 // Fonction utilitaire pour générer un token de session infalsifiable
 export const gcGenerateSessionToken = (userId) => {
   const ts = Date.now();
-  const random = Math.random().toString(36).slice(2, 11);
+  const random = Math.random().toString(36)?.slice(2, 11);
   const signature = (userId + ts + "GC_SESSION_SALT").split("").reduce((h, c) => {
     return ((h << 5) - h + c.charCodeAt(0)) | 0;
   }, 0);
@@ -816,6 +816,43 @@ export const gcCalcDueDate = (process, priority, fromDate = null) => {
     base.setDate(base.getDate() + 1);
   }
   return base.toISOString().split("T")[0];
+};
+
+// [FIX RACINE 2026-06-22] gcGenerateDossierRef — référence de dossier garantie unique,
+// JAMAIS réutilisée même après suppression.
+//
+// AVANT : le numéro de séquence ("A02" dans DOS-A02-O02.02/2026) était calculé à partir
+// de `dossiers.length + 1` — la TAILLE ACTUELLE du tableau de dossiers EN VIE. Supprimer
+// un dossier fait mécaniquement baisser cette taille de 1 : le PROCHAIN dossier créé
+// récupère alors le même numéro, donc EXACTEMENT LA MÊME RÉFÉRENCE qu'un dossier
+// différent et supprimé. C'est ce qui s'est produit (au moins 3 fois) pour la référence
+// "DOS-A02-O02.02" : créée/supprimée le 03/06, recréée/supprimée le 18/06, puis
+// réattribuée le 22/06 à un dossier totalement différent (client "MINDZIE NGOMO OPINA").
+// Deux problèmes en découlent : une référence officielle dupliquée (risque pour la
+// traçabilité juridique des dossiers), et un risque que les mécanismes anti-résurrection
+// basés sur l'ID (tombstones) bloquent à tort la réutilisation légitime d'un code.
+//
+// MAINTENANT : le prochain numéro = (plus grand numéro JAMAIS attribué) + 1, calculé à
+// partir du registre de codification (gc-codif-registry, qui n'est JAMAIS purgé lors
+// d'une suppression de dossier — voir DossiersList.jsx, setCodifRegistry n'est appelé
+// qu'en ajout) ET des dossiers actuellement en vie (au cas où le registre serait
+// incomplet). L'année est désormais toujours dynamique (l'ancien code avait "/2026"
+// écrit en dur dans handleCreateDossier).
+export const gcGenerateDossierRef = (process, dossiers = [], codifRegistry = []) => {
+  const seqFromRef = (ref) => {
+    if (!ref) return 0;
+    const m = String(ref).match(/^DOS-A(\d+)-/);
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  const maxLive = (dossiers || []).reduce((max, d) => Math.max(max, seqFromRef(d?.id || d?.ref)), 0);
+  const maxRegistry = (codifRegistry || [])
+    .filter(c => c?.type === "DOS")
+    .reduce((max, c) => Math.max(max, seqFromRef(c?.ref || c?.sourceId)), 0);
+  const next = Math.max(maxLive, maxRegistry) + 1;
+  const num = String(next).padStart(2, "0");
+  const year = new Date().getFullYear();
+  const id = `DOS-A${num}-${process}.${num}/${year}`;
+  return { id, num };
 };
 
 // Statut délai d'un dossier (pour badge couleur)
@@ -1601,7 +1638,7 @@ const gcAntiRedondance = {
     // Nettoyage : garder seulement les 1000 dernières entrées récentes
     const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
     const cleaned = Object.fromEntries(
-      Object.entries(data).filter(([_k, v]) => new Date(v.at).getTime() > cutoff).slice(-1000)
+      Object.entries(data).filter(([_k, v]) => new Date(v.at).getTime() > cutoff)?.slice(-1000)
     );
     gcAntiRedondance._save(cleaned);
   },
@@ -1626,7 +1663,12 @@ const gcAntiRedondance = {
 // dans le journal, le bilan, la trésorerie, les états financiers et l'OHADA Ref.
 // ═══════════════════════════════════════════════════════════════════════════
 export const gcGetActivePlan = () => {
+  const byNum = (a, b) => String(a.num).localeCompare(String(b.num), undefined, { numeric: true });
   try {
+    const activePlan = JSON.parse(_lsGet("gc-ohada-active-plan") || "null");
+    if (Array.isArray(activePlan) && activePlan.length > 0) {
+      return activePlan.map(c => ({ ...c, num: String(c.num || '').trim(), cl: Number(c.cl) || 6, type: String(c.type || 'AUT').toUpperCase() })).sort(byNum);
+    }
     const overrides = JSON.parse(_lsGet("gc-ohada-overrides") || "[]");
     const customs   = JSON.parse(_lsGet("gc-ohada-custom")    || "[]");
     const hiddenNums = new Set(overrides.filter(o => o.hidden).map(o => o.num));
@@ -1638,8 +1680,15 @@ export const gcGetActivePlan = () => {
         return ov ? { ...c, ...ov, overridden: true } : c;
       });
     // Ajout des comptes personnalisés qui ne sont pas dans le plan standard
-    const customOnly = customs.filter(c => !PLAN_COMPTABLE_OHADA.find(b => b.num === c.num));
-    return [...base, ...customOnly];
+    // FIX — normalisation num/cl/type (comme la branche activePlan ci-dessus) : un num stocké
+    // avec espace résiduel ou type non-string faisait échouer les comparaisons strictes (===)
+    // faites partout ailleurs (journal, grand livre, balance) → faux "Compte inconnu".
+    const customsNorm = customs.map(c => ({ ...c, num: String(c.num || '').trim(), cl: Number(c.cl) || 6, type: String(c.type || 'AUT').toUpperCase() }));
+    const customOnly = customsNorm.filter(c => !PLAN_COMPTABLE_OHADA.find(b => b.num === c.num));
+    // FIX — tri par numéro : customOnly était concaténé en fin de liste sans tri, un compte
+    // personnalisé de classe 6 s'affichait après tous les comptes de classe 8 dans le
+    // référentiel OHADA, cassant la lecture par ordre de classe.
+    return [...base, ...customOnly].sort(byNum);
   } catch(_) {
     return PLAN_COMPTABLE_OHADA;
   }

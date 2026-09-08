@@ -317,7 +317,7 @@ export default function App() {
       reason: extra.reason || null,
     };
     setSessionLogs(prev => {
-      const updated = [logBase, ...prev]?.slice(0, 5000);
+      const updated = [logBase, ...prev]?.slice(0, 500);
       try { _lsSet("gc-session-logs", JSON.stringify(updated)); dsSave("gc-session-logs", updated); } catch (_) {}
       return updated;
     });
@@ -325,7 +325,7 @@ export default function App() {
       if (ip !== logBase.ip) {
         setSessionLogs(prev => {
           const updated = prev.map(l => l.id === logBase.id ? { ...l, ip } : l);
-          try { _lsSet("gc-session-logs", JSON.stringify(updated?.slice(0, 5000))); dsSave("gc-session-logs", updated?.slice(0, 5000)); } catch (_) {}
+          try { _lsSet("gc-session-logs", JSON.stringify(updated?.slice(0, 500))); dsSave("gc-session-logs", updated?.slice(0, 500)); } catch (_) {}
           return updated;
         });
       }

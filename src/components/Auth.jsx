@@ -631,16 +631,16 @@ export function LoginPage(props) {
         try {
           const stored = JSON.parse(_lsGet("gc-security-alerts")||"[]");
           stored.unshift({ id:"SA-"+Date.now(), type:"SUSPENDU_LOGIN", msg:alertMsg, at:new Date().toISOString(), userId:user.id, userName:user.name, targets:rhMgIds });
-          _lsSet("gc-security-alerts", JSON.stringify(stored.slice(0,100))); dsSave("gc-security-alerts", stored.slice(0,100)).catch(err => gcToast.syncError('', err));
+          _lsSet("gc-security-alerts", JSON.stringify(stored)); dsSave("gc-security-alerts", stored).catch(err => gcToast.syncError('', err));
         } catch (_) {}
         const allTargets = (users||[]).filter(u => u.isAdmin || (u.process==="S03"&&u.level>=4) || u.isMG || u.id==="USR-MG-001");
-        allTargets.forEach(u => { try { const k=`GC_SI_v12:notif:${u.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); ex.unshift({id:"N"+Date.now()+u.id,icon:"🔴",message:alertMsg,at:new Date().toISOString(),read:false,module:"sessions"}); _lsSet(k,JSON.stringify(ex.slice(0,200))); } catch (_) {} });
+        allTargets.forEach(u => { try { const k=`GC_SI_v12:notif:${u.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); ex.unshift({id:"N"+Date.now()+u.id,icon:"🔴",message:alertMsg,at:new Date().toISOString(),read:false,module:"sessions"}); _lsSet(k,JSON.stringify(ex?.slice(0,200))); } catch (_) {} });
         // FIX v81 — Also create a pending connection request for suspended users so admin can generate an access code
         if (setPendingConnections) {
           const suspCode = generateAccessCode ? generateAccessCode() : (()=>{
             const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
             const r=Array.from({length:8},()=>c[Math.floor(Math.random()*c.length)]).join("");
-            return r.slice(0,4)+"-"+r.slice(4);
+            return r?.slice(0,4)+"-"+r?.slice(4);
           })();
           const suspReq = {
             id:"CONN-"+Date.now(), userId:user.id, userName:user.name,
@@ -656,7 +656,7 @@ export function LoginPage(props) {
           });
           // Notify approvers
           const approverTargets2 = (users||[]).filter(u=>u.isAdmin||(u.isMG||u.id==="USR-MG-001")||((u.process==="S03"||(u.processes||[]).includes("S03"))&&u.level>=4));
-          approverTargets2.forEach(u=>{ try { const k=`GC_SI_v12:notif:${u.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); const n={id:"N"+Date.now()+u.id,icon:"🔴",message:`[COMPTE SUSPENDU] ${user.name} (${user.role}) — Code généré : ${suspCode} · Valide 15 min · Approuvez dans Gestion Comptes → Connexions`,at:new Date().toISOString(),read:false,module:"gestion_comptes",urgent:true}; _lsSet(k,JSON.stringify([n,...ex].slice(0,200))); } catch(_) {} });
+          approverTargets2.forEach(u=>{ try { const k=`GC_SI_v12:notif:${u.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); const n={id:"N"+Date.now()+u.id,icon:"🔴",message:`[COMPTE SUSPENDU] ${user.name} (${user.role}) — Code généré : ${suspCode} · Valide 15 min · Approuvez dans Gestion Comptes → Connexions`,at:new Date().toISOString(),read:false,module:"gestion_comptes",urgent:true}; _lsSet(k,JSON.stringify([n,...ex]?.slice(0,200))); } catch(_) {} });
         }
       }
       playSound("alarm");
@@ -767,10 +767,10 @@ export function LoginPage(props) {
         try {
           const stored = JSON.parse(_lsGet("gc-security-alerts")||"[]");
           stored.unshift({ id:"SA-"+Date.now(), type:"HORS_HORAIRES", msg:hhMsg, at:new Date().toISOString(), userId:user.id, userName:user.name });
-          _lsSet("gc-security-alerts", JSON.stringify(stored.slice(0,100))); dsSave("gc-security-alerts", stored.slice(0,100)).catch(err => gcToast.syncError('', err));
+          _lsSet("gc-security-alerts", JSON.stringify(stored)); dsSave("gc-security-alerts", stored).catch(err => gcToast.syncError('', err));
         } catch (_) {}
         const hhTargets = (users||[]).filter(u => u.isAdmin || (u.process==="S03"&&u.level>=4) || u.isMG || u.id==="USR-MG-001");
-        hhTargets.forEach(u => { try { const k=`GC_SI_v12:notif:${u.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); ex.unshift({id:"N"+Date.now()+u.id,icon:"⏰",message:hhMsg,at:new Date().toISOString(),read:false,module:"sessions"}); _lsSet(k,JSON.stringify(ex.slice(0,200))); } catch (_) {} });
+        hhTargets.forEach(u => { try { const k=`GC_SI_v12:notif:${u.id}`; const ex=JSON.parse(_lsGet(k)||"[]"); ex.unshift({id:"N"+Date.now()+u.id,icon:"⏰",message:hhMsg,at:new Date().toISOString(),read:false,module:"sessions"}); _lsSet(k,JSON.stringify(ex?.slice(0,200))); } catch (_) {} });
       }
       if (user.level >= 5 || user.isAdmin || isMGUser) {
         playSound("success");
@@ -840,7 +840,7 @@ export function LoginPage(props) {
       const preCode = generateAccessCode ? generateAccessCode() : (()=>{
         const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
         const r=Array.from({length:8},()=>c[Math.floor(Math.random()*c.length)]).join("");
-        return r.slice(0,4)+"-"+r.slice(4);
+        return r?.slice(0,4)+"-"+r?.slice(4);
       })();
       const newReq = {
         id:"CONN-"+Date.now(), userId:user.id, userName:user.name,
@@ -862,7 +862,7 @@ export function LoginPage(props) {
           const k=`GC_SI_v12:notif:${u.id}`;
           const ex=JSON.parse(_lsGet(k)||"[]");
           const n={id:"N"+Date.now()+u.id,icon:"🔑",message:`[DEMANDE CONNEXION] ${user.name} (${user.role}) — Code généré : ${preCode} · À transmettre au collaborateur · Valide 15 min`,at:new Date().toISOString(),read:false,module:"gestion_comptes",urgent:true};
-          _lsSet(k,JSON.stringify([n,...ex].slice(0,200)));
+          _lsSet(k,JSON.stringify([n,...ex]?.slice(0,200)));
         } catch(_) {}
       });
       setAwaitingApproval(true);
@@ -1051,7 +1051,7 @@ export function LoginPage(props) {
               const user=loginUsers.find(u=>u.id===userId);
               if(!user)return;
               const reqId="CONN-"+Date.now();
-              const newCode = (()=>{const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";const r=Array.from({length:8},()=>c[Math.floor(Math.random()*c.length)]).join("");return r.slice(0,4)+"-"+r.slice(4);})();
+              const newCode = (()=>{const c="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";const r=Array.from({length:8},()=>c[Math.floor(Math.random()*c.length)]).join("");return r?.slice(0,4)+"-"+r?.slice(4);})();
               const newReq={id:reqId,userId:user.id,userName:user.name,userRole:user.role,userLevel:user.level,requestedAt:new Date().toISOString(),approvedCode:newCode,expiresAt:new Date(Date.now()+15*60*1000).toISOString(),reRequest:true};
               if(setPendingConnections)setPendingConnections(prev=>[newReq,...prev.filter(r=>r.userId!==user.id)]);
               // Notifier tous les approbateurs (Admin + DG + RH niv4)
@@ -1151,7 +1151,7 @@ export function CreateAccountPage({ onBack, onSubmit, T }) {
     setFunc(v);
     setLocked(true);
     const fn = USER_FUNCTIONS.find((f) => f.value === v);
-    const code = v.slice(0, 3).toUpperCase();
+    const code = v?.slice(0, 3).toUpperCase();
     const num = String(Math.floor(Math.random() * 900) + 100);
     setGenId(`USR-${code}-${num}`);
   };
@@ -1396,7 +1396,7 @@ export function ProfileDropdown({ currentUser, dossiers=[], taches=[], onOpenPro
             </div>
           </div>
         </div>
-        {currentUser.bio && <div style={{ color:T.textDim,fontSize:10,marginTop:10,lineHeight:1.5,fontStyle:"italic" }}>"{currentUser.bio.slice(0,80)}…"</div>}
+        {currentUser.bio && <div style={{ color:T.textDim,fontSize:10,marginTop:10,lineHeight:1.5,fontStyle:"italic" }}>"{currentUser.bio?.slice(0,80)}…"</div>}
       </div>
 
       {/* Mini tableau de bord */}
@@ -1815,7 +1815,7 @@ export function ProfilePage({ currentUser, users=[], onClose, canEdit, onSave, o
                 <div style={{ background:T.surface2,borderRadius:10,padding:14,border:`1px solid ${T.border}` }}>
                   <div style={{ color:T.text,fontWeight:600,fontSize:13,marginBottom:6 }}>Informations de session</div>
                   <div style={{ color:T.textMuted,fontSize:12 }}>Dernière connexion : {new Date().toLocaleString("fr-FR")}</div>
-                  <div style={{ color:T.textMuted,fontSize:12,marginTop:4 }}>ID de session : SI-{Math.random().toString(36).slice(2,10).toUpperCase()}</div>
+                  <div style={{ color:T.textMuted,fontSize:12,marginTop:4 }}>ID de session : SI-{Math.random().toString(36)?.slice(2,10).toUpperCase()}</div>
                 </div>
               </div>
             </div>
@@ -1845,7 +1845,7 @@ export function ProfilePage({ currentUser, users=[], onClose, canEdit, onSave, o
               const exp = { exportedAt: new Date().toISOString(), user: { ...currentUser, passwordHash: undefined, password: undefined, passwordHistory: undefined } };
               const blob = new Blob([JSON.stringify(exp, null, 2)], {type:"application/json"});
               const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-              a.download = `gc-profil-${currentUser.id}-${new Date().toISOString().slice(0,10)}.json`;
+              a.download = `gc-profil-${currentUser.id}-${new Date().toISOString()?.slice(0,10)}.json`;
               a.click(); URL.revokeObjectURL(a.href);
             };
             return (

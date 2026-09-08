@@ -1,14 +1,14 @@
 {
   "name": "si-genie-consultant-fixed",
   "private": true,
-  "version": "10.5.1",
+  "version": "10.5.10",
   "description": "Système d'Information Intégré — Génie Consultant Libreville",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "build:analyze": "vite build --mode analyze",
-    "preview": "vite preview --host",
+    "preview": "vite preview --host 0.0.0.0",
     "prod": "npm run build && npm run preview",
     "si:start": "powershell -ExecutionPolicy Bypass -File .\\scripts\\si-start.ps1",
     "si:stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\si-stop.ps1",
@@ -33,7 +33,8 @@
   },
   "dependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

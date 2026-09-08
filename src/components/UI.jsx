@@ -84,7 +84,7 @@ export function QRDisplay({ value, size = 80, showDownload = false, label = "" }
           ctx.fillStyle = "#000000";
           ctx.font = "bold 9px Arial";
           ctx.textAlign = "center";
-          ctx.fillText(label.slice(0, 40), canvas.width / 2, canvas.height - 4);
+          ctx.fillText(label?.slice(0, 40), canvas.width / 2, canvas.height - 4);
         }
         URL.revokeObjectURL(url);
         const link = document.createElement("a");
@@ -463,7 +463,7 @@ export const SmartBanner = React.memo(function SmartBanner({
   const h = now.getHours();
   const greetWord = h<6?"Bonne nuit":h<12?"Bonjour":h<18?"Bon après-midi":"Bonsoir";
   const greetEmoji = h<6?"🌙":h<12?"🌅":h<17?"☀️":"🌆";
-  const firstName = (localUser.name||"").split(" ").slice(-1)[0];
+  const firstName = (localUser.name||"").split(" ")?.slice(-1)[0];
   const procAccentBanner = procColors?.[localUser.processes?.[0]||localUser.process] || "#C41E3A";
 
   const myProcs = localUser.processes||[localUser.process];

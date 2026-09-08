@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useDialog } from '../components/Dialog.jsx';
 // ToolsWidget — topbar tools, calculatrice, etc.
 // SI Génie Consultant v127
-import { _lsGet, _lsSet, _noop, playSound, _gcSafeCalc , dsSave } from '../core/index.js';
+import { _lsGet, _lsSet, _noop, playSound, _gcSafeCalc, dsSave, gcCalcIRPP, gcLoadFiscalConfig } from '../core/index.js';
 import { gcToast } from './ToastManager.jsx';
 import { Btn, Modal } from './UI.jsx';
 import { BudgetRapideApp } from '../modules/bureautique/BudgetRapide.jsx';
+import { ClockWidgetPanel } from './ClockButton.jsx';
 export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
   const _dlg = useDialog();
   const gcAlert   = (msg, title, icon) => _dlg.alert(msg, title, icon);
@@ -117,7 +118,7 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
     setCalcPrev(null); setCalcOp(null); setCalcReset(true);
   };
   const calcClear = () => { setCalcDisplay("0"); setCalcPrev(null); setCalcOp(null); setCalcReset(false); };
-  const calcToggleSign = () => setCalcDisplay(prev => prev.startsWith("-") ? prev.slice(1) : "-" + prev);
+  const calcToggleSign = () => setCalcDisplay(prev => prev.startsWith("-") ? prev?.slice(1) : "-" + prev);
 
   const RATES = { XAF: 1, EUR: 0.00152, USD: 0.00165, GBP: 0.0013, CHF: 0.00149, MAD: 0.0165, NGN: 2.54, CNY: 0.012 };
   const CURRENCIES = ["XAF","EUR","USD","GBP","CHF","MAD","NGN","CNY"];
@@ -133,6 +134,7 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
 
   const tools = [
     { id: "calc", icon: "🧮", label: "Calc Pro" },
+    { id: "horloge", icon: "🕐", label: "Horloge" },
     { id: "budget_rapide", icon: "📉", label: "Budget Rapide" },
     { id: "notes", icon: "📝", label: "Mémos & Notes" },
     { id: "visionneuse", icon: "👁️", label: "Visionneuse" },
@@ -154,7 +156,7 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
   const [tableurFormula, setTableurFormula] = useState("");
 
   const [printers, setPrintersW] = useState(() => {
-    try { return JSON.parse(_lsGet("gc-printers")||"null") || [{ id:"PRT-001", name:"HP LaserJet Pro MFP", ip:"192.168.1.100", status:"CONNECTEE" }]; } catch (_) { return []; }
+    try { return JSON.parse(_lsGet("gc-printers")||"null") || []; } catch (_) { return []; }
   });
   const [printCopies, setPrintCopies] = useState(1);
   const [printFormat, setPrintFormat] = useState("A4");
@@ -177,7 +179,7 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
     if (val.startsWith("=")) {
       try {
         // FIX v92 Bug#2b — Pas d'eval : parser sécurisé via _gcSafeCalc
-        const expr = val.slice(1).replace(/([A-F])(\d+)/gi, (_, col, row) => {
+        const expr = val?.slice(1).replace(/([A-F])(\d+)/gi, (_, col, row) => {
           const ci = "ABCDEF".indexOf(col.toUpperCase());
           const ri = parseInt(row, 10)-1;
           return parseFloat(tableurRows[ri]?.[ci]?.v) || 0;
@@ -208,7 +210,7 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
     try {
       const queue = JSON.parse(_lsGet("gc-print-queue")||"[]");
       queue.unshift({ id:`PQ-${Date.now()}`, name:"Document_SI", printer:printSelectedPrt, status:"EN_ATTENTE", copies:printCopies, format:printFormat, addedAt:new Date().toISOString() });
-      _lsSet("gc-print-queue", JSON.stringify(queue.slice(0,50)));
+      _lsSet("gc-print-queue", JSON.stringify(queue?.slice(0,50)));
     } catch (_) { /* ignore storage errors */ }
     gcAlert(`🖨️ Envoyé à ${prt.name} — ${printCopies} copie(s) — ${printFormat}`);
     setOpen(false);
@@ -250,6 +252,9 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
             {/* BUDGET RAPIDE */}
             {tool === "budget_rapide" && <BudgetRapideApp T={T} currentUser={{id:"tools",name:"Outils",level:1}} setNotifications={setNotifications} />}
 
+            {/* HORLOGE — minuteur, chrono, alarmes (intégré ici avec les autres outils) */}
+            {tool === "horloge" && <ClockWidgetPanel T={T} setNotifications={setNotifications} />}
+
             {/* CALCULATOR */}
             {tool === "calc" && (() => {
               const RATES2 = {XAF:1,EUR:0.001524,USD:0.00169,GBP:0.00133,CNY:0.01224,MAD:0.0165,NGN:2.54};
@@ -265,13 +270,14 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
                 if(v==="1/x"){try{const n=parseFloat(cDisplay);setCDisplay(n!==0?String(1/n):"ERR");}catch (_) {}return;}
                 if(v==="="){try{
                   // FIX v92 Bug#2d — Remplace eval() par _gcSafeCalc dans la calculatrice
-                  const fullExpr = cExpr+(cDisplay==="0"&&cExpr?"":cDisplay);
+                  // [FIX P1-01] "0" (pas "") quand cDisplay==="0" : "5+=" => "5+0" au lieu de "5+" (=#ERR)
+                  const fullExpr = cExpr+(cDisplay==="0"&&cExpr?"0":cDisplay);
                   // Normaliser × → * et ÷ → / pour le parser
                   const normalized = fullExpr.replace(/×/g,"*").replace(/÷/g,"/").replace(/\*\*/g,"^");
                   const r = _gcSafeCalc(normalized);
                   if(r===null){setCDisplay("ERR");setCExpr("");return;}
                   const res=String(Number(r.toFixed(10)));
-                  setCHist(h=>[`${fullExpr} = ${res}`,...h].slice(0,8));setCDisplay(res);setCExpr("");
+                  setCHist(h=>[`${fullExpr} = ${res}`,...h]?.slice(0,8));setCDisplay(res);setCExpr("");
                 }catch (_) {setCDisplay("ERR");setCExpr("");}return;}
                 if(["+","-","×","÷","^"].includes(v)){setCExpr(cExpr+cDisplay+(v==="×"?"*":v==="÷"?"/":v==="^"?"**":v));setCDisplay("0");return;}
                 if(v==="MC"){setCMem(0);return;}if(v==="MR"){setCDisplay(String(cMem));return;}if(v==="M+"){setCMem(m=>m+(parseFloat(cDisplay)||0));return;}if(v==="M-"){setCMem(m=>m-(parseFloat(cDisplay)||0));return;}
@@ -294,7 +300,13 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
               };
               const calcCNSS2 = () => {
                 const b=parseFloat(cnssBase2)||0;
-                const cnss=b*0.025; const irpp=b>1500000?b*0.35:b>600000?b*0.20:b*0.05;
+                const cnss=b*0.025;
+                // [FIX P2-02] AVANT : irpp = b>1500000?b*0.35:b>600000?b*0.20:b*0.05 (taux marginal
+                // appliqué sur la totalité du salaire — fiscalement incorrect, surestime fortement
+                // l'impôt dès qu'on dépasse une tranche). APRÈS : calcul progressif par tranches via
+                // gcCalcIRPP, identique à celui utilisé pour la paie réelle (cohérence garantie même
+                // si les tranches sont reconfigurées dans Paramètres > Configuration fiscale).
+                const irpp=gcCalcIRPP(b, gcLoadFiscalConfig());
                 setCnssRes2({brut:b,cnss:Math.round(cnss),irpp:Math.round(irpp),net:Math.round(b-cnss-irpp)});
               };
               return (
@@ -441,9 +453,9 @@ export function ToolsWidget({ T, rdvs, setRdvs=_noop, setNotifications=_noop }){
                             </div>
                             <div style={{display:"flex",gap:5,marginBottom:3}}>
                               <span style={{background:"#C41E3A22",color:"#C41E3A",borderRadius:3,padding:"1px 5px",fontSize:8}}>{m.category||"MÉMO"}</span>
-                              {m.tags&&m.tags.split(",").slice(0,2).map(t=><span key={t} style={{background:T.surface3,color:T.textMuted,borderRadius:3,padding:"1px 5px",fontSize:8}}>{t.trim()}</span>)}
+                              {m.tags&&m.tags.split(",")?.slice(0,2).map(t=><span key={t} style={{background:T.surface3,color:T.textMuted,borderRadius:3,padding:"1px 5px",fontSize:8}}>{t.trim()}</span>)}
                             </div>
-                            <div style={{color:T.textMuted,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.content.slice(0,55)}{m.content.length>55?"…":""}</div>
+                            <div style={{color:T.textMuted,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.content?.slice(0,55)}{m.content.length>55?"…":""}</div>
                             {m.plannedDate&&<div style={{color:"#F59E0B",fontSize:9,marginTop:2}}>📅 {m.plannedDate} {m.plannedTime||""}</div>}
                             <div style={{display:"flex",gap:6,marginTop:4,alignItems:"center"}}>
                               <span style={{color:T.textDim,fontSize:8}}>{new Date(m.updatedAt||m.createdAt).toLocaleDateString("fr-FR")}</span>

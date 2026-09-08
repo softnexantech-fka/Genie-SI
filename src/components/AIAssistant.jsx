@@ -18,9 +18,9 @@ export function GCAIMarkdown({ text, T2 }){
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (!l.trim()) { elements.push(<div key={key++} style={{ height: 6 }} />); continue; }
-    if (l.startsWith("## ")) { elements.push(<div key={key++} style={{ color: "#C9A84C", fontWeight: 800, fontSize: 13, marginTop: 8, marginBottom: 3 }}>{l.slice(3)}</div>); continue; }
-    if (l.startsWith("# "))  { elements.push(<div key={key++} style={{ color: "#C41E3A", fontWeight: 900, fontSize: 14, marginTop: 10, marginBottom: 4 }}>{l.slice(2)}</div>); continue; }
-    if (l.startsWith("### ")){ elements.push(<div key={key++} style={{ color: T2.text, fontWeight: 700, fontSize: 12, marginTop: 6, marginBottom: 2 }}>{l.slice(4)}</div>); continue; }
+    if (l.startsWith("## ")) { elements.push(<div key={key++} style={{ color: "#C9A84C", fontWeight: 800, fontSize: 13, marginTop: 8, marginBottom: 3 }}>{l?.slice(3)}</div>); continue; }
+    if (l.startsWith("# "))  { elements.push(<div key={key++} style={{ color: "#C41E3A", fontWeight: 900, fontSize: 14, marginTop: 10, marginBottom: 4 }}>{l?.slice(2)}</div>); continue; }
+    if (l.startsWith("### ")){ elements.push(<div key={key++} style={{ color: T2.text, fontWeight: 700, fontSize: 12, marginTop: 6, marginBottom: 2 }}>{l?.slice(4)}</div>); continue; }
     if (/^[-•*] /.test(l)) { elements.push(<div key={key++} style={{ display: "flex", gap: 6, marginBottom: 2, paddingLeft: 4 }}><span style={{ color: "#C41E3A", flexShrink: 0, marginTop: 1 }}>▸</span><span style={{ color: T2.text, fontSize: 12, lineHeight: 1.55 }}>{renderInline(l.replace(/^[-•*] /, ""), key)}</span></div>); continue; }
     const numMatch = l.match(/^(\d+)\. (.+)/);
     if (numMatch) { elements.push(<div key={key++} style={{ display: "flex", gap: 8, marginBottom: 2, paddingLeft: 4 }}><span style={{ color: "#C9A84C", fontWeight: 700, fontSize: 11, flexShrink: 0, minWidth: 18 }}>{numMatch[1]}.</span><span style={{ color: T2.text, fontSize: 12, lineHeight: 1.55 }}>{renderInline(numMatch[2], key)}</span></div>); continue; }
@@ -31,8 +31,8 @@ export function GCAIMarkdown({ text, T2 }){
   function renderInline(str, baseKey) {
     const parts = str.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
     return parts.map((p, j) => {
-      if (p.startsWith("**") && p.endsWith("**")) return <strong key={j} style={{ color: T2.text, fontWeight: 700 }}>{p.slice(2, -2)}</strong>;
-      if (p.startsWith("`") && p.endsWith("`")) return <code key={j} style={{ background: "#060F1E", color: "#C9A84C", fontFamily: "monospace", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>{p.slice(1, -1)}</code>;
+      if (p.startsWith("**") && p.endsWith("**")) return <strong key={j} style={{ color: T2.text, fontWeight: 700 }}>{p?.slice(2, -2)}</strong>;
+      if (p.startsWith("`") && p.endsWith("`")) return <code key={j} style={{ background: "#060F1E", color: "#C9A84C", fontFamily: "monospace", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>{p?.slice(1, -1)}</code>;
       return p;
     });
   }
@@ -88,7 +88,7 @@ export const AIAssistant = React.memo(function AIAssistant({T, currentUser, doss
       count: messages.length,
     };
     setChatHistory(prev => {
-      const updated = [entry, ...prev].slice(0, 50); // keep last 50
+      const updated = [entry, ...prev]?.slice(0, 50); // keep last 50
       try{ _lsSet(`gc-ai-history:${uid}`, JSON.stringify(updated)); }catch(_){}
       return updated;
     });
@@ -122,9 +122,9 @@ export const AIAssistant = React.memo(function AIAssistant({T, currentUser, doss
       rdvsAujourdhui: myRdvs.filter(r => r.date === today).length,
       approbasEnAttente: lvl>=3 ? (pendingApprovals||[]).filter(a=>!a.accountCreated&&a.status!=="REJETE").length : 0,
       dossiersEnRetard: actifs.filter(d => d.dueDate && new Date(d.dueDate) < now).length,
-      dossiersRecents: actifs.slice(0,3).map(d=>`"${d.client}" (${d.ref})`).join(", ") || null,
-      tachesRecentes: tachesEnCours.filter(t=>t.priority==="HAUTE").slice(0,3).map(t=>t.titre).join(", ") || null,
-      clientsActifs: [...new Set(actifs.map(d=>d.client))].slice(0,4).join(", ") || null,
+      dossiersRecents: actifs?.slice(0,3).map(d=>`"${d.client}" (${d.ref})`).join(", ") || null,
+      tachesRecentes: tachesEnCours.filter(t=>t.priority==="HAUTE")?.slice(0,3).map(t=>t.titre).join(", ") || null,
+      clientsActifs: [...new Set(actifs.map(d=>d.client))]?.slice(0,4).join(", ") || null,
     };
   }, [currentUser, dossiers, taches, rdvs, pendingApprovals]);
 
@@ -233,7 +233,14 @@ export const AIAssistant = React.memo(function AIAssistant({T, currentUser, doss
       {/* ── FAB + badges ── Le wrapper gère overflow:visible pour que les badges débordent vraiment */}
       <div style={{position:"fixed", bottom:24, right:24, zIndex:1001, width:58, height:58}}>
         {/* Bouton principal */}
-        <div onClick={()=>{ setOpen(o=>!o); if(!open) playSound("notif"); }}
+        <div onClick={()=>{
+          const closing = open;
+          setOpen(o=>!o);
+          if(!open) playSound("notif");
+          // [FIX] Sauvegarder automatiquement la conversation en cours à la fermeture
+          // (elle n'était sauvegardée que si l'utilisateur cliquait explicitement sur 🆕)
+          if (closing && msgs.length > 1) saveConvToHistory(msgs);
+        }}
           title={`Assistant IA — ${currentUser?.role||"Collaborateur"} · Niv.${currentUser?.level||1} · Moteur ${activeEngine}`}
           style={{
             position:"absolute", inset:0, borderRadius:"50%",
@@ -361,7 +368,7 @@ export const AIAssistant = React.memo(function AIAssistant({T, currentUser, doss
           {/* ── MODULE SELECTOR — collapsible +/- ─────────── */}
           <div style={{borderBottom:`1px solid ${T2.border}20`,flexShrink:0,background:T2.surface3}}>
             <div style={{display:"flex",alignItems:"center",padding:"4px 10px",gap:6}}>
-              <span style={{color:T2.textDim,fontSize:9,flex:1}}>🧭 Contexte IA : {module==="default"?"Général":module.charAt(0).toUpperCase()+module.slice(1)}</span>
+              <span style={{color:T2.textDim,fontSize:9,flex:1}}>🧭 Contexte IA : {module==="default"?"Général":module.charAt(0).toUpperCase()+module?.slice(1)}</span>
               <button onClick={()=>setShowModuleBar(v=>!v)}
                 title={showModuleBar?"Réduire les modules":"Développer les modules"}
                 style={{background:"transparent",border:`1px solid ${T2.border}44`,color:T2.textMuted,borderRadius:4,padding:"1px 7px",cursor:"pointer",fontSize:11,fontWeight:900,lineHeight:1}}>
@@ -373,7 +380,7 @@ export const AIAssistant = React.memo(function AIAssistant({T, currentUser, doss
                 {Object.entries({default:"🏠",juridique:"⚖️",finance:"💰",audit:"🔍",conformite:"🛡️",sirh:"👥",conseil:"🎯"}).map(([mod,ico])=>(
                   <button key={mod} onClick={()=>{setModule(mod);setShowModuleBar(false);}}
                     style={{background:module===mod?"#C41E3A":"transparent",border:`1px solid ${module===mod?"#C41E3A":T2.border+"44"}`,color:module===mod?"#fff":T2.textDim,borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:9,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>
-                    {ico} {mod==="default"?"Général":mod.charAt(0).toUpperCase()+mod.slice(1)}
+                    {ico} {mod==="default"?"Général":mod.charAt(0).toUpperCase()+mod?.slice(1)}
                   </button>
                 ))}
               </div>
@@ -446,7 +453,7 @@ export const AIAssistant = React.memo(function AIAssistant({T, currentUser, doss
                           </button>
                         )}
                         {m.text.length>200 && (
-                          <button onClick={()=>{ const blob=new Blob([m.text],{type:"text/plain"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`IA_reponse_${new Date().toISOString().slice(0,10)}.txt`; a.click(); }} style={{background:"transparent",border:"none",color:T2.textDim,cursor:"pointer",fontSize:9,padding:"1px 4px",borderRadius:4}}>
+                          <button onClick={()=>{ const blob=new Blob([m.text],{type:"text/plain"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`IA_reponse_${new Date().toISOString()?.slice(0,10)}.txt`; a.click(); }} style={{background:"transparent",border:"none",color:T2.textDim,cursor:"pointer",fontSize:9,padding:"1px 4px",borderRadius:4}}>
                             💾 Télécharger
                           </button>
                         )}
@@ -552,7 +559,7 @@ export function AIConfigAdminTab({ T, isAdmin=false, isMG=false }) {
       if(eid==="gemini") result = await gcAICallGemini("Réponds juste: opérationnel",[{role:"user",text:"Test"}],ecfg?.apiKey);
       else if(eid==="gpt") result = await gcAICallGPT("Réponds juste: opérationnel",[{role:"user",text:"Test"}],ecfg?.apiKey);
       else result = await gcAICallClaude("Réponds juste: opérationnel",[{role:"user",text:"Test"}]);
-      setAiTestResult({engine:eid,ok:true,msg:`✅ ${label} opérationnel — "${(result||"").slice(0,40)}"`});
+      setAiTestResult({engine:eid,ok:true,msg:`✅ ${label} opérationnel — "${(result||"")?.slice(0,40)}"`});
     } catch(e) {
       setAiTestResult({engine:eid,ok:false,msg:`❌ ${label} : ${e.message?.slice(0,80)}`});
     }

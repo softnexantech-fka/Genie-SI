@@ -37,7 +37,16 @@ export default defineConfig([
         sourceType: "module",
         ecmaFeatures: { jsx: true },
       },
-      globals: { ...globals.browser, ...globals.node },
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        // Constantes injectées au build par Vite (voir vite.config.js → define).
+        // Sans cette déclaration, ESLint les signale en "no-undef" alors qu'elles
+        // sont valides à l'exécution (substituées littéralement par esbuild/Rollup).
+        __GC_PROXY_URL__: "readonly",
+        __APP_VERSION__: "readonly",
+        __BUILD_DATE__: "readonly",
+      },
     },
     settings: {
       react: { version: "detect" },

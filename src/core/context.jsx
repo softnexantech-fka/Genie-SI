@@ -400,11 +400,11 @@ export class SIErrorBoundary extends React.Component {
     const ts=new Date().toISOString();
     // Extraire le composant source depuis la stack
     const stack=(info?.componentStack||'');
-    const sourceLines=stack.split('\n').filter(l=>l.trim().startsWith('at ')).slice(0,6);
+    const sourceLines=stack.split('\n').filter(l=>l.trim().startsWith('at '))?.slice(0,6);
     try{
       const log={ts,msg:error?.message||String(error),component:sourceLines[0]?.trim()||'?',componentStack:sourceLines.join('\n'),stack:error?.stack?.slice(0,600)};
       const prev=JSON.parse(localStorage.getItem('gc-error-log')||'[]');
-      localStorage.setItem('gc-error-log',JSON.stringify([log,...prev].slice(0,30)));
+      localStorage.setItem('gc-error-log',JSON.stringify([log,...prev]?.slice(0,30)));
     }catch(_){}
     this.setState(s=>{
       const timeSinceLast=s.lastCrashTs?Date.now()-new Date(s.lastCrashTs).getTime():Infinity;
@@ -440,13 +440,13 @@ export class SIErrorBoundary extends React.Component {
 
       // Extraire le composant source et la ligne
       const rawStack=(errorInfo?.componentStack||'');
-      const srcLines=rawStack.split('\n').filter(l=>l.trim().startsWith('at ')).slice(0,5);
+      const srcLines=rawStack.split('\n').filter(l=>l.trim().startsWith('at '))?.slice(0,5);
       const firstSrc=srcLines[0]?.trim()||null;
       // Extraire le nom du composant React parent
       const compMatch=firstSrc?.match(/^at (\w+)/);
       const compName=compMatch?compMatch[1]:null;
       // Extraire ligne JS si dispo dans error.stack
-      const jsStackLines=(error?.stack||'').split('\n').filter(l=>l.includes('<anonymous>')||l.includes('.jsx')||l.includes('.js')).slice(0,3);
+      const jsStackLines=(error?.stack||'').split('\n').filter(l=>l.includes('<anonymous>')||l.includes('.jsx')||l.includes('.js'))?.slice(0,3);
       const firstJsLine=jsStackLines[0]?.trim()||null;
 
       // Mapper les noms de composants aux modules SI lisibles
@@ -578,7 +578,7 @@ export const gcPushNotif = (userId, notif) => {
       Math.abs(new Date(n.at||0).getTime() - now) < 5000
     );
     if (isDup) return;
-    const next = [notif, ...ex].slice(0, 200);
+    const next = [notif, ...ex]?.slice(0, 200);
     _lsSet(k, JSON.stringify(next));
     // FIX v129 — Sync cross-machine : propager les notifications aux autres postes
     // via le hook enregistré par dsRegisterNotifSync() (datastore.js)

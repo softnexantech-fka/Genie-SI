@@ -237,7 +237,6 @@ export const SHARED_KEYS = new Set([
   'gc-auto-backup-enabled', // activation backup auto
   'gc-auto-backup-interval',// intervalle backup auto
   'gc-printers',            // liste imprimantes partagées
-  'gc-codif-rules',         // règles de codification/numérotation des documents (config cabinet, pas personnelle)
   'gc-print-queue',         // queue impression partagée
   'gc-prefill-facture',     // templates facture préremplie
   'gc-bureau-lastvisits',   // derniers bureaux visités
@@ -269,13 +268,6 @@ function isSharedKey(key) {
   if (!key) return false;
   if (SHARED_KEYS.has(key)) return true;
   if (key.startsWith('gc-notif-')) return true;
-  // BudgetRapide.jsx utilise une clé par utilisateur "gc-budget-rapide:<userId>" — persistance
-  // liée AU COMPTE (retrouvable sur n'importe quel poste où l'utilisateur se connecte), mais
-  // sans partage entre utilisateurs puisque chacun a sa propre clé (même logique que l'historique
-  // de conversation de l'assistant IA). Sans ce préfixe, dsSave/dsGet traitaient la clé comme
-  // non-partagée → écriture localStorage uniquement, aucun appel serveur, perte au moindre
-  // vidage de cache ou changement de poste.
-  if (key.startsWith('gc-budget-rapide:')) return true;
   // Clés aliasées
   if (key === 'users' || key === 'dossiers' || key === 'taches' || key === 'rdvs' || key === 'pendingApprovals' || key === 'partners' || key === 'standaloneDocuments' || key === 'notifications') return true;
   return false;

@@ -102,7 +102,7 @@ export function ToastContainer() {
   const addToast = useCallback((toast) => {
     const id = ++_idCounter;
     const entry = { ...toast, id };
-    setToasts(prev => [...prev.slice(-6), entry]); // max 7 toasts simultanés
+    setToasts(prev => [...(prev||[]).slice(-6), entry]); // max 7 toasts simultanés
 
     if (toast.duration > 0) {
       timersRef.current[id] = setTimeout(() => dismiss(id), toast.duration);

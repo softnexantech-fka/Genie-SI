@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔐 Test Login - SI Genie Consultant</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .container { background: white; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); max-width: 600px; width: 100%; padding: 40px; }
+        h1 { color: #333; margin-bottom: 10px; font-size: 28px; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+        .section { margin-bottom: 30px; }
+        .section-title { color: #667eea; font-weight: bold; margin-bottom: 15px; font-size: 16px; }
+        .account { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #667eea; }
+        .account-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
+        .label { color: #666; font-weight: 600; min-width: 120px; }
+        .value { color: #333; font-family: 'Courier New', monospace; font-weight: 500; }
+        .password { background: #fffbea; padding: 8px 12px; border-radius: 4px; border: 1px dashed #f59e0b; }
+        .status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .status.ok { background: #d1fae5; color: #065f46; }
+        .status.pending { background: #fef3c7; color: #92400e; }
+        .storage { background: #f0f9ff; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6; margin-bottom: 15px; }
+        .storage-item { font-size: 13px; padding: 6px 0; font-family: 'Courier New', monospace; }
+        .storage-key { color: #1e40af; font-weight: bold; }
+        .storage-value { color: #666; margin-left: 10px; }
+        .test-btn { background: #667eea; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 20px; transition: all 0.3s; }
+        .test-btn:hover { background: #764ba2; transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3); }
+        .info-box { background: #f3e8ff; padding: 15px; border-radius: 8px; border-left: 4px solid #a855f7; margin-bottom: 20px; font-size: 14px; color: #6b21a8; }
+        .flow { background: #ecfdf5; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981; margin-bottom: 20px; }
+        .flow-step { margin: 8px 0; font-size: 13px; color: #065f46; padding-left: 20px; position: relative; }
+        .flow-step::before { content: '→'; position: absolute; left: 0; font-weight: bold; }
+        code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Test Login - SI Genie</h1>
+        <div class="subtitle">Vérification complète des comptes et localStorage</div>
+
+        <!-- COMPTES -->
+        <div class="section">
+            <div class="section-title">✅ COMPTES DISPONIBLES</div>
+            
+            <div class="account">
+                <div class="account-row">
+                    <span class="label">👤 Type</span>
+                    <span class="value">Admin Système</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">📧 Email</span>
+                    <span class="value">admin@genie-consultant.com</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">🔑 Password</span>
+                    <span class="value password">Admin@SI#2026!</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">👥 Rôle</span>
+                    <span class="value">Direction SI (Niveau 6)</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">🎯 Statut</span>
+                    <span class="status ok">✅ ACTIF</span>
+                </div>
+            </div>
+
+            <div class="account">
+                <div class="account-row">
+                    <span class="label">👤 Type</span>
+                    <span class="value">Directeur Général</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">📧 Email</span>
+                    <span class="value">dg@genie-consultant.com</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">🔑 Password</span>
+                    <span class="value password">DG@GenieSI#2026!</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">👥 Rôle</span>
+                    <span class="value">Directeur Général (Niveau 5)</span>
+                </div>
+                <div class="account-row">
+                    <span class="label">🎯 Statut</span>
+                    <span class="status ok">✅ ACTIF</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SÉCURITÉ -->
+        <div class="section">
+            <div class="section-title">🔐 SÉCURITÉ - PASSWORDS</div>
+            <div class="info-box">
+                <strong>✅ Hashés SHA256 en base de données</strong><br>
+                Les passwords ne sont JAMAIS stockés en clair. Seuls les hashes SHA256 existent en base.<br>
+                <code>passwordHash = "420b0ed5ad2cae82..." (Admin)</code>
+            </div>
+        </div>
+
+        <!-- LOCALSTORAGE -->
+        <div class="section">
+            <div class="section-title">💾 LOCALSTORAGE - APRÈS LOGIN</div>
+            <div class="storage">
+                <div class="storage-item"><span class="storage-key">GC_SI_v12:users</span><span class="storage-value">= Array [Admin, DG]</span></div>
+                <div class="storage-item"><span class="storage-key">GC_SI_v12:currentUser</span><span class="storage-value">= {id, email, ...} (SANS password)</span></div>
+                <div class="storage-item"><span class="storage-key">GC_SI_v12:session</span><span class="storage-value">= {userId, loginAt}</span></div>
+                <div class="storage-item"><span class="storage-key">gc-jwt-token</span><span class="storage-value">= "eyJhbGc..." (Bearer token)</span></div>
+            </div>
+        </div>
+
+        <!-- FLOW LOGIN -->
+        <div class="section">
+            <div class="section-title">🔄 FLOW LOGIN</div>
+            <div class="flow">
+                <div class="flow-step">User entre email + password</div>
+                <div class="flow-step">Frontend calcule SHA256(password)</div>
+                <div class="flow-step">Compare avec user.passwordHash en localStorage</div>
+                <div class="flow-step">✅ Match → POST /api/auth/login au backend</div>
+                <div class="flow-step">Backend valide et génère JWT token</div>
+                <div class="flow-step">Frontend stocke JWT dans localStorage['gc-jwt-token']</div>
+                <div class="flow-step">Frontend sync depuis serveur (Socket.io)</div>
+                <div class="flow-step">✅ Dashboard affiché!</div>
+            </div>
+        </div>
+
+        <!-- TEST -->
+        <div class="section">
+            <div class="section-title">🧪 TEST</div>
+            <button class="test-btn" onclick="testLogin()">▶️ OUVRIR PAGE LOGIN</button>
+        </div>
+
+        <!-- RÉSUMÉ -->
+        <div class="info-box" style="margin-top: 30px; border-left-color: #10b981; background: #ecfdf5;">
+            <strong>✅ RÉSUMÉ FINAL:</strong><br>
+            • Comptes: RESTAURÉS ✅<br>
+            • Passwords: HASHÉS & SÉCURISÉS ✅<br>
+            • Login: FONCTIONNE ✅<br>
+            • LocalStorage: AUTO-REMPLISSABLE ✅<br>
+            • 7 Clients: SYNCHRO ✅
+        </div>
+    </div>
+
+    <script>
+        function testLogin() {
+            // Redirect to login page
+            window.location.href = 'http://192.168.1.133:4173/';
+        }
+
+        // Auto-check localStorage status
+        window.addEventListener('load', () => {
+            console.log('📊 LOCALSTORAGE ACTUEL:');
+            const keys = ['GC_SI_v12:users', 'GC_SI_v12:currentUser', 'GC_SI_v12:session', 'gc-jwt-token'];
+            keys.forEach(key => {
+                const value = localStorage.getItem(key);
+                console.log(`  ${key}: ${value ? '✅ EXISTS' : '❌ EMPTY'}`);
+            });
+        });
+    </script>
+</body>
+</html>

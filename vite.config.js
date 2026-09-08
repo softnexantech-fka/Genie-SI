@@ -55,7 +55,7 @@ export default defineConfig({
 
   server: {
     port: 4173,
-    host: true,        // ← Rend l'app accessible sur le réseau local (Scénario B)
+    host: '0.0.0.0',   // ← Écoute sur TOUTES les interfaces IPv4 (réseau local + distant)
     proxy: {
       '/socket.io': {
         target: MASTER_BACKEND,
@@ -195,7 +195,13 @@ export default defineConfig({
 
   // ── Variables d'environnement exposées au client ──────────────────────────
   define: {
-    // [FIX v153-C] Version lue depuis package.json — plus de divergence entre UI et vraie version
+    // [FIX P0-01 cause 2] URL du proxy IA côté client (src/core/helpers.js → GC_AI_PROXY_URL).
+    // "" = URL relative : les appels /api/ai/* passent par le proxy Vite (dev ET preview, voir
+    // server.proxy / preview.proxy ci-dessus) qui les redirige vers MASTER_BACKEND. C'est la
+    // configuration correcte pour ce déploiement LAN — ne pas mettre d'URL absolue ici sauf
+    // architecture de déploiement différente (ex: reverse-proxy externe avec chemin dédié).
+    __GC_PROXY_URL__: JSON.stringify(''),
+    // [FIX P2-05 — cohérence] Version lue depuis package.json — plus de divergence entre UI et vraie version
     __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().split('T')[0]),
   },
